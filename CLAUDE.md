@@ -8,6 +8,7 @@ Desktop app (Windows) that syncs Moodle courses/assignments/notifications into a
 - `server.go` — local HTTP API (Host check + per-boot token header `X-UniHub-Token`).
 - `moodle.go` (REST client, mobile service token) · `sync.go` (download/organize, never deletes; changed files saved as "(نسخة محدثة …)") · `organize.go` (copy-only import of old folders).
 - `index.go` + `text.go` (inverted index, Arabic normalization) · `extract.go` + `pdf.go` (text extraction, custom PDF parser incl. encryption).
+- `handoff.go` — starting a newer exe while an older copy runs: it reads the old page's token, calls `/api/quit`, and takes over (replacing the installed copy if needed).
 - `update.go` — GitHub Releases auto-update: assets `UniHub.exe` + `checksums.txt` (SHA-256 verified), backup of data dir, rename running exe to `.old`, restart.
 - `feedback.go` — "الملاحظات الفنية": GitHub Issues titled `[ملاحظة:<نوع>] <عنوان>`, label `ملاحظة فنية`, offline outbox, polling + toasts. Diagnostics after `\n---\n` in the body are hidden in the app.
 - `platform_windows.go` — toasts, folder picker, autostart, DPAPI secret encryption, self-install to `%LOCALAPPDATA%\Programs\UniHub`.
@@ -24,5 +25,5 @@ Desktop app (Windows) that syncs Moodle courses/assignments/notifications into a
 ## Handling technical notes (feedback loop)
 1. Read open issues with the label `ملاحظة فنية` (GitHub MCP `list_issues` / `issue_read`), or the text the owner pasted from "نسخ للإصلاح".
 2. Fix, commit to `main`, comment on each issue what changed, and close it when released.
-3. Release: bump the version — create an annotated tag `vX.Y.Z` whose message is the Arabic changelog (Markdown list) and push it. `.github/workflows/release.yml` builds `UniHub.exe` with `-X main.Version` and `-X main.UpdateRepo=${{ github.repository }}`, then publishes it. Every installed copy updates itself within ~6 hours (or immediately via Settings → البحث عن تحديث).
+3. Release: bump the version — create an annotated tag `vX.Y.Z` whose message is the Arabic changelog (Markdown list) and push it. `.github/workflows/release.yml` builds `UniHub.exe` with `-X main.Version` and `-X main.UpdateRepo=${{ github.repository }}`, then publishes it. Every installed copy updates itself within ~1 hour, 15 s after start, or when its window opens. Claude has push access and does releases itself: commit to `main`, `git tag -a vX.Y.Z -m "<Arabic notes>"`, push the tag, then confirm the run in `gh run list` and the assets in `gh api repos/jihadTH4/unihub/releases/latest`. The owner only updates from inside the app.
 4. If the icon changes: edit `assets/icon.svg`, render PNGs (`rsvg-convert -w N`), the workflow runs `tools/winres.py`.

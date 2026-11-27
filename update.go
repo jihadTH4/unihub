@@ -29,7 +29,7 @@ import (
 // Set at build time: -ldflags "-X main.Version=1.2.0 -X main.UpdateRepo=owner/repo"
 var (
 	Version    = "1.0.0"
-	UpdateRepo = ""
+	UpdateRepo = "jihadTH4/unihub" // official repository; the release build sets it too
 	bootID     = strconv.FormatInt(time.Now().UnixNano(), 36)
 )
 
@@ -323,13 +323,23 @@ func applyUpdate() error {
 	if err := os.Rename(exe, old); err != nil {
 		return fail(fmt.Errorf("لا يمكن استبدال البرنامج: %v", err))
 	}
-	if err := copyFile(newExe, exe); err != nil {
+	// antivirus software may hold the freshly downloaded file for a few seconds
+	var cerr error
+	for i := 0; i < 10; i++ {
+		if cerr = copyFile(newExe, exe); cerr == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if cerr != nil {
+		os.Remove(exe)
 		os.Rename(old, exe) // roll back
-		return fail(err)
+		return fail(fmt.Errorf("تعذر وضع النسخة الجديدة مكان القديمة: %v", cerr))
 	}
 	os.Chmod(exe, 0o755)
 	os.RemoveAll(dir)
 	log.Println("updated", Version, "->", info.Version)
+	setUpd(func(u *UpdateState) { u.Progress = 100 })
 	go restartInto(exe, "--background", "--wait-port", "--updated-from="+Version)
 	return nil
 }
@@ -343,12 +353,25 @@ func restartInto(exe string, args ...string) {
 	if httpSrv != nil {
 		httpSrv.Close()
 	}
-	if err := startDetached(exe, args...); err != nil {
+	var err error
+	for i := 0; i < 5; i++ {
+		if err = startDetached(exe, args...); err == nil {
+			os.Exit(0)
+		}
 		log.Println("restart failed:", err)
-		return
+		time.Sleep(2 * time.Second)
 	}
-	os.Exit(0)
+	// the new program could not start: put the previous one back and run it
+	if old := exe + ".old"; fileExists(old) {
+		os.Remove(exe)
+		if os.Rename(old, exe) == nil {
+			startDetached(exe, "--background", "--wait-port")
+		}
+	}
+	os.Exit(1)
 }
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // afterUpdate runs at startup: cleans the old exe and remembers what's new.
 func afterUpdate(from string) {
@@ -427,9 +450,9 @@ func isInstalled() bool {
 	return strings.EqualFold(filepath.Clean(filepath.Dir(exe)), filepath.Clean(installDir()))
 }
 
-// updateLoop checks for updates at start and every 6 hours.
+// updateLoop checks for updates shortly after start and then every hour.
 func updateLoop() {
-	time.Sleep(45 * time.Second)
+	time.Sleep(15 * time.Second)
 	for {
 		if currentRepo() != "" {
 			info, err := checkUpdate()
@@ -448,6 +471,6 @@ func updateLoop() {
 				}
 			}
 		}
-		time.Sleep(6 * time.Hour)
+		time.Sleep(time.Hour)
 	}
 }

@@ -43,16 +43,38 @@ func main() {
 		ln, err = listen(*port)
 	}
 	if err != nil {
-		// already running? just open the window
-		c := &http.Client{Timeout: 2 * time.Second}
-		if resp, err2 := c.Get(url + "api/ping"); err2 == nil {
-			resp.Body.Close()
+		// Another copy is already running. If it is older than this one, replace it;
+		// otherwise just open its window.
+		running, ok := pingRunning(url)
+		if !ok {
+			log.Fatal("cannot listen: ", err)
+		}
+		if !newerVersion(Version, running) {
 			if !*background {
 				openURL(url)
 			}
 			return
 		}
-		log.Fatal("cannot listen: ", err)
+		log.Println("taking over from running version", running)
+		if err := stopRunning(url); err != nil {
+			log.Println("handoff:", err)
+			openURL(url)
+			return
+		}
+		if dst, moved := replaceInstalledCopy(); moved {
+			startDetached(dst, "--wait-port", "--updated-from="+running)
+			return
+		}
+		for i := 0; i < 100 && err != nil; i++ {
+			time.Sleep(200 * time.Millisecond)
+			ln, err = listen(*port)
+		}
+		if err != nil {
+			log.Fatal("cannot listen: ", err)
+		}
+		if *updatedFrom == "" {
+			*updatedFrom = running
+		}
 	}
 
 	loadConfig()

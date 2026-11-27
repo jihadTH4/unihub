@@ -251,6 +251,9 @@ function renderBanners() {
     b.push(`<div class="banner"><div class="b-ic">${ic("download")}</div><div class="b-txt"><b>جارٍ تثبيت التحديث ${esc(u.available?.version || "")}</b>
       <span>${u.progress < 100 ? "تنزيل الملف…" : "التحقق والتثبيت… سيُعاد تشغيل البرنامج تلقائياً"}</span>
       <div class="progress"><i style="width:${u.progress || 2}%"></i></div></div></div>`);
+  } else if (u.available && u.error) {
+    b.push(`<div class="banner warn"><div class="b-ic">${ic("alert")}</div><div class="b-txt"><b>لم يكتمل التحديث إلى ${esc(u.available.version)}</b>
+      <span>${esc(u.error)}</span></div><button class="btn sm gold" id="bn-upd">${ic("refresh")}إعادة المحاولة</button></div>`);
   } else if (u.available) {
     b.push(`<div class="banner"><div class="b-ic">${ic("sparkles")}</div><div class="b-txt"><b>إصدار جديد ${esc(u.available.version)} متاح</b>
       <span>بياناتك وملفاتك محفوظة بالكامل أثناء التحديث.</span></div>
@@ -913,7 +916,10 @@ views.settings = (v) => {
     <div class="card">${cardHead("sparkles", "التحديثات")}
       <dl class="kv"><dt>الإصدار الحالي</dt><dd><b>${esc(S.version)}</b></dd>
         <dt>آخر فحص</dt><dd>${u.lastCheck ? ago(u.lastCheck) : "—"}</dd>
-        <dt>الحالة</dt><dd>${u.available ? `<span class="pill gold">${ic("sparkles")}يتوفر ${esc(u.available.version)}</span>` : u.error ? `<span class="muted small">${esc(u.error)}</span>` : `<span class="pill green">${ic("check")}محدّث</span>`}</dd></dl>
+        <dt>الحالة</dt><dd>${u.installing ? `<span class="pill blue">${ic("download")}جارٍ التحديث ${u.progress || 0}%</span>`
+          : u.available ? `<span class="pill gold">${ic("sparkles")}يتوفر ${esc(u.available.version)}</span>`
+          : u.error ? `<span class="pill red">${ic("alert")}${esc(u.error)}</span>`
+          : u.lastCheck ? `<span class="pill green">${ic("check")}أحدث إصدار</span>` : `<span class="pill gray">لم يُفحص بعد</span>`}</dd></dl>
       <div style="margin-top:8px">${toggle("s-autoupd", "التحديث التلقائي", "يثبّت التحديثات بهدوء ويحفظ بياناتك قبل كل تحديث", S.autoUpdate)}</div>
       <label class="f">مستودع GitHub للتحديثات والملاحظات</label>
       <input id="s-repo" class="in" dir="ltr" placeholder="username/unihub" value="${esc(S.repo || "")}">
@@ -961,6 +967,9 @@ views.settings = (v) => {
     go("setup");
   });
   $("#s-check").addEventListener("click", async () => {
+    const btn = $("#s-check");
+    btn.disabled = true;
+    btn.innerHTML = ic("refresh", "spin") + "جارٍ البحث…";
     try { const r = await api("/api/update/check", {}); toast(r.available ? `يتوفر الإصدار ${r.available.version}` : "أنت تستخدم أحدث إصدار", r.available ? "sparkles" : "check-circle"); }
     catch (e) { toast(e.message, "alert"); }
     await refresh(); views.settings(v);
@@ -1049,6 +1058,10 @@ window.addEventListener("popstate", () => { if (!fromHash()) go("home", {}, true
   applyTheme(localStorage.getItem("uh-theme") || "auto", false);
   await refresh();
   if (!S) return;
+  // check for a new version whenever the window opens (at most every 15 minutes)
+  if (S.repo && !S.update.installing && Date.now() / 1000 - (S.update.lastCheck || 0) > 900) {
+    api("/api/update/check", {}).then(refresh).catch(() => {});
+  }
   if (!S.linked && !location.hash.match(/feedback|settings|search|import|links/)) go("setup");
   else if (!fromHash()) go("home", {}, true);
   setInterval(() => { if (!offline) refresh(); }, 5000);
