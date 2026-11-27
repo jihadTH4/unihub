@@ -15,6 +15,7 @@ Desktop app (Windows) that syncs Moodle courses/assignments/notifications into a
 - `links.go` — the user's own links (`Config.Links`), http(s) only, per-device; never hardcode one university's links.
 - `images.go` — «صوري» gallery: files in `<RootDir>/صور الجامعة/<category>/`, served by `/api/images/raw?p=&t=<token>` (img tags can't send headers), all paths checked by `imagePath`; delete = Recycle Bin (`toRecycleBin`); pins in `Config.PinnedImages`.
 - `web/` — `index.html` (SVG icon sprite), `style.css` (navy/gold design system, light/dark/auto), `app.js` (views).
+- Responsive layout: JS sets `mode-desktop` (>1100px, menu button folds the sidebar into an icon rail, saved in localStorage `uh-side`), `mode-tablet` (761–1100, rail + overlay drawer), `mode-phone` (≤760, off-canvas drawer + bottom `#tabbar`, sheets for popups/modals) plus `is-rail`/`side-open` on `<html>` (head script sets them before paint). Check new views at 390px width: no horizontal overflow (`.grid > *` has `min-width:0`).
 - User data: `%AppData%\UniHub` (config.json, state.json, feedback.json, index.gob, backups/). Updates must never break these formats — add fields, don't rename.
 
 ## Rules

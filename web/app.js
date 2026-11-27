@@ -167,9 +167,11 @@ async function refresh() {
   $("#ver").textContent = "الإصدار " + S.version;
   const pending = (S.assignments || []).filter((a) => a.status !== "submitted" && a.due > S.now).length;
   setBadge("#badge-assign", pending);
+  setBadge("#tb-assign", pending);
   setBadge("#badge-notif", S.newNotif);
   updateQuickbar();
   setBadge("#badge-fb", S.fbUnread);
+  setBadge("#tb-more", S.fbUnread);
   const sy = S.sync;
   const dot = $("#sync-dot");
   if (sy.running) {
@@ -216,6 +218,7 @@ function go(view, p = {}, fromHash = false) {
     if (location.hash !== h) history.pushState(null, "", h);
   }
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view || (view === "course" && a.dataset.view === "courses")));
+  if (typeof markTabs === "function") { markTabs(); closeSide(); }
   const v = $("#view");
   v.onclick = null;
   v.style.animation = "none";
@@ -603,7 +606,7 @@ async function loadFeedback(v) {
   const openCount = d.threads.filter((t) => t.state === "open").length;
   v.innerHTML = head("الملاحظات الفنية", `متصل كـ <b dir="ltr">@${esc(d.login)}</b> · المستودع <a data-url="https://github.com/${esc(d.repo)}" dir="ltr">${esc(d.repo)}</a>`,
     `<button class="btn" id="fb-copy" title="انسخ الملاحظات المفتوحة لإرسالها إلى Claude">${ic("copy")}نسخ للإصلاح</button><button class="btn" id="fb-refresh">${ic("refresh")}تحديث</button>`) + `
-  <div class="grid" style="grid-template-columns:minmax(320px,400px) 1fr;align-items:start">
+  <div class="grid split">
     <div class="card">${cardHead("send", "ملاحظة جديدة")}
       <div class="seg" id="fb-kind">${Object.keys(KINDS).map((k, i) => `<button class="${i === 0 ? "on" : ""}" data-k="${k}">${ic(KINDS[k][0])}${k}</button>`).join("")}</div>
       <label class="f">العنوان</label><input id="fb-title" class="in" maxlength="120" placeholder="مثال: البحث لا يجد ملفات PowerPoint">
@@ -813,14 +816,14 @@ views.links = (v) => {
   const draw = () => {
     const sugg = linkSuggestions(links);
     v.innerHTML = head("روابطي", "روابطك الخاصة بجامعتك: بوابة الطالب، صفحات الجامعة، والمواقع التي تزورها كثيراً. تظهر في الشريط الجانبي وفي الرئيسية، وهي خاصة بجهازك فقط.") + `
-    <div class="grid" style="grid-template-columns:minmax(300px,380px) 1fr;align-items:start">
+    <div class="grid split">
       <div class="card">${cardHead(editing >= 0 ? "pencil" : "plus", editing >= 0 ? "تعديل الرابط" : "إضافة رابط")}
         <label class="f" style="margin-top:0">الرابط</label>
         <input id="l-url" class="in" dir="ltr" placeholder="https://..." value="${editing >= 0 ? esc(links[editing].url) : ""}">
         <label class="f">الاسم الظاهر</label>
         <input id="l-title" class="in" maxlength="60" placeholder="مثال: بوابة الطالب" value="${editing >= 0 ? esc(links[editing].title) : ""}">
         <label class="f">النوع</label>
-        <div class="seg" id="l-kind" style="flex-wrap:wrap">${Object.entries(LINK_KINDS).map(([k, [i, , t]]) => `<button data-k="${k}">${ic(i)}${t}</button>`).join("")}</div>
+        <div class="seg wrap" id="l-kind">${Object.entries(LINK_KINDS).map(([k, [i, , t]]) => `<button data-k="${k}">${ic(i)}${t}</button>`).join("")}</div>
         <div class="row" style="margin-top:16px"><button class="btn primary" id="l-save">${ic(editing >= 0 ? "check" : "plus")}${editing >= 0 ? "حفظ التعديل" : "إضافة"}</button>
           ${editing >= 0 ? `<button class="btn ghost" id="l-cancel">إلغاء</button>` : ""}<span class="err" id="l-err"></span></div>
         <div class="hint row" style="margin-top:14px;align-items:flex-start">${ic("lock")}<span>الصفحات التي تحتاج تسجيل دخول (مثل بوابة الطالب) تُفتح في متصفحك، ويمكنك جعل المتصفح يحفظ كلمة المرور. البرنامج لا يطلب كلمات المرور هذه ولا يخزنها.</span></div>
@@ -1040,21 +1043,81 @@ views.import = (v) => {
   });
 };
 
-/* ================= sidebar collapse ================= */
-function setSide(collapsed, save = true) {
-  document.documentElement.classList.toggle("side-collapsed", collapsed);
-  if (save) try { localStorage.setItem("uh-side", collapsed ? "1" : "0"); } catch (e) {}
-  const t = $("#side-toggle");
-  t.title = collapsed ? "توسيع القائمة (Ctrl+B)" : "طي القائمة (Ctrl+B)";
-  t.setAttribute("aria-expanded", String(!collapsed));
+/* ================= responsive layout & sidebar ================= */
+const H = document.documentElement;
+const mqPhone = matchMedia("(max-width: 760px)"), mqTablet = matchMedia("(max-width: 1100px)");
+let sideCollapsed = H.classList.contains("side-collapsed"), sideOpen = false, layoutNow = "";
+const layoutMode = () => (mqPhone.matches ? "phone" : mqTablet.matches ? "tablet" : "desktop");
+function applyLayout() {
+  const m = layoutMode();
+  if (m === "desktop") sideOpen = false;
+  if (layoutNow && layoutNow !== m) {
+    H.classList.add("no-anim");
+    requestAnimationFrame(() => requestAnimationFrame(() => H.classList.remove("no-anim")));
+  }
+  layoutNow = m;
+  H.classList.remove("mode-phone", "mode-tablet", "mode-desktop");
+  H.classList.add("mode-" + m);
+  H.classList.toggle("side-collapsed", sideCollapsed);
+  H.classList.toggle("side-open", sideOpen);
+  H.classList.toggle("is-rail", m === "tablet" ? !sideOpen : m === "desktop" && sideCollapsed);
+  const b = $("#menu-btn");
+  b.setAttribute("aria-expanded", String(m === "desktop" ? !sideCollapsed : sideOpen));
+  b.title = m === "desktop" ? (sideCollapsed ? "توسيع القائمة (Ctrl+B)" : "طي القائمة (Ctrl+B)") : "القائمة";
+  $("#q").placeholder = m === "phone" ? "ابحث في ملفاتك…" : "ابحث في كل المحاضرات والواجبات والملفات…";
+  document.body.style.overflow = sideOpen && m === "phone" ? "hidden" : "";
 }
-$("#side-toggle").addEventListener("click", () => setSide(!document.documentElement.classList.contains("side-collapsed")));
+function toggleSide() {
+  if (layoutMode() === "desktop") {
+    sideCollapsed = !sideCollapsed;
+    try { localStorage.setItem("uh-side", sideCollapsed ? "1" : "0"); } catch (e) {}
+  } else sideOpen = !sideOpen;
+  applyLayout();
+}
+function closeSide() { if (sideOpen) { sideOpen = false; applyLayout(); } }
+$("#menu-btn").addEventListener("click", toggleSide);
+$("#drawer-close").addEventListener("click", closeSide);
+$("#scrim").addEventListener("click", closeSide);
+mqPhone.addEventListener("change", applyLayout);
+mqTablet.addEventListener("change", applyLayout);
 document.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") { e.preventDefault(); $("#side-toggle").click(); }
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSide(); }
+  else if (e.key === "Escape" && sideOpen) closeSide();
 });
+// links and buttons inside the sliding sidebar close it after use
+$("#side").addEventListener("click", (e) => { if (layoutMode() !== "desktop" && e.target.closest("nav a, [data-go]")) setTimeout(closeSide, 60); });
+// swipe: from the right edge to open the drawer, to the right to close it (phone)
+(() => {
+  let x0 = 0, y0 = 0, from = "";
+  document.addEventListener("touchstart", (e) => {
+    if (layoutMode() !== "phone" || e.touches.length !== 1) { from = ""; return; }
+    const t = e.touches[0];
+    x0 = t.clientX; y0 = t.clientY;
+    from = sideOpen ? "open" : x0 > window.innerWidth - 24 && !LB ? "edge" : "";
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!from) return;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
+    if (from === "open" && dx > 60 && dy < 60) closeSide();
+    if (from === "edge" && dx < -50 && dy < 60) { sideOpen = true; applyLayout(); }
+    from = "";
+  }, { passive: true });
+})();
 $$("#nav a[data-view]").forEach((a) => { if (!a.title) a.title = a.querySelector("span")?.textContent || ""; });
-setSide(document.documentElement.classList.contains("side-collapsed"), false);
-requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.remove("no-anim")));
+
+// bottom tab bar (phone)
+const TABS = ["home", "courses", "assignments", "images"];
+function markTabs() {
+  const v = current === "course" ? "courses" : current;
+  $$("#tabbar a").forEach((a) => a.classList.toggle("active", a.dataset.tab === v || (a.dataset.tab === "more" && !TABS.includes(v))));
+}
+$("#tabbar").addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-tab]");
+  if (!a) return;
+  if (a.dataset.tab === "more") { sideOpen = true; applyLayout(); } else go(a.dataset.tab);
+});
+applyLayout();
+requestAnimationFrame(() => requestAnimationFrame(() => H.classList.remove("no-anim")));
 
 /* ================= quick access bar ================= */
 async function quitApp() {
@@ -1204,7 +1267,7 @@ function drawImages(v) {
     <input type="file" id="up-file" accept="image/*" multiple hidden>
   </div>
   <div class="filters">
-    <div class="seg" style="flex-wrap:wrap"><button data-cat="all" class="${imgFilter === "all" ? "on" : ""}">الكل <span class="muted">${IMG.items.length}</span></button>
+    <div class="seg wrap"><button data-cat="all" class="${imgFilter === "all" ? "on" : ""}">الكل <span class="muted">${IMG.items.length}</span></button>
       ${cats.map((c) => `<button data-cat="${esc(c.name)}" class="${imgFilter === c.name ? "on" : ""}">${esc(c.name)} <span class="muted">${c.count}</span></button>`).join("")}</div>
     <span class="spacer"></span>
     <input class="in" id="img-q" placeholder="ابحث في أسماء الصور" value="${esc(imgQuery)}" style="width:220px">
@@ -1251,6 +1314,15 @@ function openLightbox(list, i) {
     el.className = "lightbox";
     document.body.appendChild(el);
     el.addEventListener("click", lbClick);
+    // swipe between images on touch screens (RTL: swipe toward the right = next)
+    let sx = 0, sy = 0;
+    el.addEventListener("touchstart", (e) => { if (e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; } else sx = NaN; }, { passive: true });
+    el.addEventListener("touchend", (e) => {
+      if (!LB || LB.zoom || isNaN(sx)) return;
+      const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) > 60 && Math.abs(dy) < 80) $(`#lightbox [data-lb=${dx > 0 ? "next" : "prev"}]`)?.click();
+      else if (dy > 110 && Math.abs(dx) < 60) closeLightbox();
+    }, { passive: true });
   }
   el.classList.remove("hide");
   drawLightbox();
