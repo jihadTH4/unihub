@@ -1,17 +1,23 @@
 name: إصدار جديد
 
-# يعمل تلقائياً عند رفع وسم مثل v1.2.0 (أو عند نشر Release من صفحة GitHub)
+# ينشر إصداراً تلقائياً في ثلاث حالات:
+# 1) رفع تعديل على main يغيّر ملف VERSION (الطريقة المعتادة: Claude يرفع الرقم الجديد وملاحظاته)
+# 2) رفع وسم مثل v1.2.0
+# 3) نشر Release يدوياً من صفحة GitHub
 on:
   push:
+    branches: [main]
+    paths: [VERSION]
     tags: ["v*"]
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -28,15 +34,29 @@ jobs:
 
       - name: تحديد رقم الإصدار
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v$(tr -d ' \r\n' < VERSION)"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          # a release that already has the program attached needs nothing more
+          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx UniHub.exe; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: الأيقونة ومعلومات الإصدار
+        if: steps.v.outputs.skip != 'true'
         run: python3 tools/winres.py "${{ steps.v.outputs.version }}"
 
       - name: البناء لويندوز
+        if: steps.v.outputs.skip != 'true'
         env:
           GOOS: windows
           GOARCH: amd64
@@ -52,13 +72,18 @@ jobs:
           zip -9 UniHub-Windows.zip UniHub.exe README-AR.txt checksums.txt
 
       - name: نشر الملفات في صفحة الإصدار
+        if: steps.v.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            NOTES=$(git tag -l --format='%(contents)' "$TAG")
+            if [ -f RELEASE_NOTES.md ] && [ "${{ github.ref_type }}" != "tag" ]; then
+              NOTES=$(cat RELEASE_NOTES.md)
+            else
+              NOTES=$(git tag -l --format='%(contents)' "$TAG")
+            fi
             [ -z "$NOTES" ] && NOTES="إصدار $TAG"
-            gh release create "$TAG" --title "منظّم الجامعة $TAG" --notes "$NOTES"
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "منظّم الجامعة $TAG" --notes "$NOTES"
           fi
           gh release upload "$TAG" dist/UniHub.exe dist/checksums.txt dist/UniHub-Windows.zip --clobber
