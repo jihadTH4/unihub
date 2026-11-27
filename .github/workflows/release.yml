@@ -1,0 +1,64 @@
+name: إصدار جديد
+
+# يعمل تلقائياً عند رفع وسم مثل v1.2.0 (أو عند نشر Release من صفحة GitHub)
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: تحديد رقم الإصدار
+        id: v
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: الأيقونة ومعلومات الإصدار
+        run: python3 tools/winres.py "${{ steps.v.outputs.version }}"
+
+      - name: البناء لويندوز
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go build -trimpath \
+            -ldflags "-H windowsgui -s -w -X main.Version=${{ steps.v.outputs.version }} -X main.UpdateRepo=${{ github.repository }}" \
+            -o dist/UniHub.exe .
+          cd dist
+          sha256sum UniHub.exe > checksums.txt
+          cp ../docs/README-AR.txt . 2>/dev/null || true
+          zip -9 UniHub-Windows.zip UniHub.exe README-AR.txt checksums.txt
+
+      - name: نشر الملفات في صفحة الإصدار
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            NOTES=$(git tag -l --format='%(contents)' "$TAG")
+            [ -z "$NOTES" ] && NOTES="إصدار $TAG"
+            gh release create "$TAG" --title "منظّم الجامعة $TAG" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" dist/UniHub.exe dist/checksums.txt dist/UniHub-Windows.zip --clobber
