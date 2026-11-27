@@ -26,6 +26,7 @@ type Config struct {
 	AutoUpdate    bool     `json:"autoUpdate"`
 	Theme         string   `json:"theme"` // auto | light | dark
 	Links         []Link   `json:"links"` // the user's own university links (portal, pages, sites)
+	PinnedImages  []string `json:"pinnedImages"`
 }
 
 // Link is a personal shortcut shown in the sidebar and on the home page.

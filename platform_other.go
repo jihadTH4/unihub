@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"time"
 )
 
 func opener() string {
@@ -46,3 +48,10 @@ func startDetached(exe string, args ...string) error {
 	return cmd.Start()
 }
 func osVersion() string { return runtime.GOOS + "/" + runtime.GOARCH }
+
+// toRecycleBin moves the file into a hidden .trash folder next to it.
+func toRecycleBin(p string) error {
+	dir := filepath.Join(filepath.Dir(filepath.Dir(p)), ".trash")
+	os.MkdirAll(dir, 0o755)
+	return os.Rename(p, filepath.Join(dir, strconv.FormatInt(time.Now().UnixNano(), 36)+"-"+filepath.Base(p)))
+}

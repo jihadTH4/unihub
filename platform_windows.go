@@ -214,3 +214,20 @@ func osVersion() string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// toRecycleBin moves a file to the Windows Recycle Bin.
+func toRecycleBin(p string) error {
+	script := `
+$ErrorActionPreference = 'Stop'
+$p = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('` + b64(p) + `'))
+Add-Type -AssemblyName Microsoft.VisualBasic
+[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+`
+	if _, err := runPS(script); err != nil {
+		return errors.New("تعذر نقل الصورة إلى سلة المحذوفات")
+	}
+	if _, err := os.Stat(p); err == nil {
+		return errors.New("تعذر نقل الصورة إلى سلة المحذوفات")
+	}
+	return nil
+}

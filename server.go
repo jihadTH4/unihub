@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -458,6 +459,105 @@ func newServer(port int) http.Handler {
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
+	// ----- images gallery -----
+	mux.HandleFunc("/api/images", func(w http.ResponseWriter, r *http.Request) {
+		items, cats := listImages()
+		writeJSON(w, map[string]any{"items": items, "categories": cats, "root": imagesRoot()})
+	})
+	mux.HandleFunc("/api/images/raw", serveImage)
+	mux.HandleFunc("/api/images/upload", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			writeErr(w, 405, "POST")
+			return
+		}
+		mr, err := r.MultipartReader()
+		if err != nil {
+			writeErr(w, 400, "طلب غير صالح")
+			return
+		}
+		cat := "أخرى"
+		var saved []string
+		var errs []string
+		for {
+			part, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			if part.FormName() == "category" {
+				b, _ := io.ReadAll(io.LimitReader(part, 200))
+				cat = string(b)
+				continue
+			}
+			if part.FileName() == "" {
+				continue
+			}
+			p, err := saveUploadedImage(cat, part.FileName(), part)
+			if err != nil {
+				errs = append(errs, err.Error())
+				continue
+			}
+			saved = append(saved, relOf(p))
+		}
+		if len(saved) > 0 {
+			go indexer.Rescan()
+		}
+		writeJSON(w, map[string]any{"saved": saved, "errors": errs})
+	})
+	mux.HandleFunc("/api/images/edit", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Rel, Name, Category string }
+		if readBody(r, &req) != nil {
+			writeErr(w, 400, "طلب غير صالح")
+			return
+		}
+		rel, err := renameImage(req.Rel, req.Name, req.Category)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "rel": rel})
+	})
+	mux.HandleFunc("/api/images/pin", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Rel    string `json:"rel"`
+			Pinned bool   `json:"pinned"`
+		}
+		if readBody(r, &req) != nil {
+			writeErr(w, 400, "طلب غير صالح")
+			return
+		}
+		if _, err := imagePath(req.Rel); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		pinImage(filepath.ToSlash(filepath.Clean(filepath.FromSlash(req.Rel))), req.Pinned)
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/api/images/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Rel string }
+		if readBody(r, &req) != nil {
+			writeErr(w, 400, "طلب غير صالح")
+			return
+		}
+		if err := removeImage(req.Rel); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/api/images/category", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Name string }
+		if readBody(r, &req) != nil || strings.TrimSpace(req.Name) == "" {
+			writeErr(w, 400, "اكتب اسم التصنيف")
+			return
+		}
+		name := cleanCategory(req.Name)
+		if err := os.MkdirAll(filepath.Join(imagesRoot(), name), 0o755); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "name": name})
+	})
+
 	mux.HandleFunc("/api/backup", func(w http.ResponseWriter, r *http.Request) {
 		backupData(Version)
 		dir := filepath.Join(dataDir, "backups")
@@ -611,7 +711,12 @@ func newServer(port int) http.Handler {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/ping" {
-			if r.Header.Get("X-UniHub-Token") != apiToken {
+			// <img> tags can't send headers, so the image endpoint takes the token in the URL
+			tok := r.Header.Get("X-UniHub-Token")
+			if r.URL.Path == "/api/images/raw" && r.Method == "GET" {
+				tok = r.URL.Query().Get("t")
+			}
+			if tok != apiToken {
 				writeErr(w, 403, "انتهت الجلسة، أعد تحميل الصفحة")
 				return
 			}

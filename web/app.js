@@ -168,6 +168,7 @@ async function refresh() {
   const pending = (S.assignments || []).filter((a) => a.status !== "submitted" && a.due > S.now).length;
   setBadge("#badge-assign", pending);
   setBadge("#badge-notif", S.newNotif);
+  updateQuickbar();
   setBadge("#badge-fb", S.fbUnread);
   const sy = S.sync;
   const dot = $("#sync-dot");
@@ -185,7 +186,7 @@ async function refresh() {
   renderNavLinks();
   renderBanners();
   if (S.update.justUpdated && !$("#modal").dataset.shown) showWhatsNew();
-  if (!S.linked && !["settings", "setup", "search", "import", "feedback", "links"].includes(current)) go("setup");
+  if (!S.linked && !["settings", "setup", "search", "import", "feedback", "links", "images"].includes(current)) go("setup");
   else if (["home", "assignments", "notifications", "courses"].includes(current) && !document.activeElement?.closest("#view")) render();
 }
 
@@ -237,7 +238,7 @@ function render(fresh) {
   if (!S) return;
   const v = $("#view");
   const fn = views[current] || views.home;
-  if (fresh || !["search", "import", "settings", "setup", "course", "feedback", "links"].includes(current)) {
+  if (fresh || !["search", "import", "settings", "setup", "course", "feedback", "links", "images"].includes(current)) {
     const html = fn(v, fresh);
     if (typeof html === "string") v.innerHTML = html;
   }
@@ -364,6 +365,7 @@ views.home = () => {
     <div class="stat"><div class="ic blue">${ic("search", "lg")}</div><div><b>${S.index.docs.toLocaleString("en")}</b><span>ملف قابل للبحث</span></div></div>
     <div class="stat"><div class="ic green">${ic("bell", "lg")}</div><div><b>${S.newNotif || 0}</b><span>إشعار جديد</span></div></div>
   </div>
+  ${pinnedCard()}
   ${(S.links || []).length ? `<div class="card" style="margin-bottom:20px">${cardHead("link", "روابطي", `<a data-go="links" class="small">تعديل</a>`)}
     <div class="quick-links">${S.links.map(qlink).join("")}</div></div>` : ""}
   <div class="grid g2">
@@ -515,7 +517,7 @@ $("#q").addEventListener("keydown", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$("#modal").classList.contains("hide")) closeModal();
+  if (e.key === "Escape" && !$("#modal").classList.contains("hide")) { closeModal(); e.stopImmediatePropagation(); return; }
   if ((e.key === "/" || (e.ctrlKey && e.key.toLowerCase() === "k")) && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) {
     e.preventDefault();
     $("#q").focus();
@@ -977,11 +979,7 @@ views.settings = (v) => {
   $("#s-upd")?.addEventListener("click", startUpdate);
   $("#s-backup").addEventListener("click", async () => { await api("/api/backup", {}); toast("تم حفظ نسخة احتياطية من بياناتك", "archive"); });
   $("#s-rescan").addEventListener("click", async () => { await api("/api/rescan", {}); toast("بدأ فحص الملفات", "refresh"); });
-  $("#s-quit").addEventListener("click", async () => {
-    if (!confirm("إيقاف البرنامج؟ لن تصلك تنبيهات حتى تشغّله مرة أخرى.")) return;
-    await api("/api/quit", {});
-    document.body.innerHTML = `<div class="setup" style="margin-top:12vh"><div class="card" style="text-align:center;padding:40px"><img src="icon.svg" style="width:64px"><h2 style="justify-content:center;margin-top:12px">تم إيقاف البرنامج</h2><p class="muted">يمكنك إغلاق هذه الصفحة. لتشغيله مرة أخرى افتح «منظّم الجامعة» من قائمة ابدأ.</p></div></div>`;
-  });
+  $("#s-quit").addEventListener("click", quitApp);
   $("#s-save").addEventListener("click", async () => {
     $("#s-err").textContent = "";
     if ($("#s-add").value.trim()) addExtra($("#s-add").value);
@@ -1042,6 +1040,292 @@ views.import = (v) => {
   });
 };
 
+/* ================= sidebar collapse ================= */
+function setSide(collapsed, save = true) {
+  document.documentElement.classList.toggle("side-collapsed", collapsed);
+  if (save) try { localStorage.setItem("uh-side", collapsed ? "1" : "0"); } catch (e) {}
+  const t = $("#side-toggle");
+  t.title = collapsed ? "توسيع القائمة (Ctrl+B)" : "طي القائمة (Ctrl+B)";
+  t.setAttribute("aria-expanded", String(!collapsed));
+}
+$("#side-toggle").addEventListener("click", () => setSide(!document.documentElement.classList.contains("side-collapsed")));
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") { e.preventDefault(); $("#side-toggle").click(); }
+});
+$$("#nav a[data-view]").forEach((a) => { if (!a.title) a.title = a.querySelector("span")?.textContent || ""; });
+setSide(document.documentElement.classList.contains("side-collapsed"), false);
+requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.remove("no-anim")));
+
+/* ================= quick access bar ================= */
+async function quitApp() {
+  if (!confirm("إيقاف البرنامج؟ لن تصلك تنبيهات حتى تشغّله مرة أخرى.")) return;
+  try { await api("/api/quit", {}); } catch (e) {}
+  document.body.innerHTML = `<div class="setup" style="margin-top:12vh"><div class="card" style="text-align:center;padding:40px"><img src="icon.svg" style="width:64px"><h2 style="justify-content:center;margin-top:12px">تم إيقاف البرنامج</h2><p class="muted">يمكنك إغلاق هذه الصفحة. لتشغيله مرة أخرى افتح «منظّم الجامعة» من قائمة ابدأ.</p></div></div>`;
+}
+const initial = (name) => { const w = String(name || "").trim().split(/\s+/)[0] || ""; return [...w][0] || ""; };
+
+function updateQuickbar() {
+  const name = S.linked ? (S.fullName || S.username || "حسابي") : "غير مربوط";
+  $("#qb-name").textContent = name;
+  const ini = S.linked ? initial(S.fullName) : "";
+  const av = $("#qb-av");
+  if (av.dataset.ini !== ini) { av.dataset.ini = ini; av.innerHTML = ini ? esc(ini) : ic("user"); }
+  const b = $("#qb-badge");
+  b.textContent = S.newNotif > 9 ? "9+" : S.newNotif || "";
+  b.classList.toggle("hide", !S.newNotif);
+  $("#qb-account").title = name;
+  if (popKind === "notif" && !$("#pop").classList.contains("hide")) drawNotifPop(false);
+}
+
+let popKind = null;
+function closePop() {
+  popKind = null;
+  $("#pop").classList.add("hide");
+  $$("#quickbar .on").forEach((b) => b.classList.remove("on"));
+}
+function openPop(kind, btn) {
+  if (popKind === kind) { closePop(); return; }
+  closePop();
+  popKind = kind;
+  btn.classList.add("on");
+  $("#pop").classList.remove("hide");
+  if (kind === "notif") drawNotifPop(true);
+  else drawAccountPop();
+}
+function drawNotifPop(first) {
+  const list = (S.notifications || []).slice(0, 7);
+  $("#pop").innerHTML = `<div class="pop-head"><span>الإشعارات</span><a class="small" data-pop-go="notifications">عرض الكل</a></div>
+    ${list.map((n) => `<div class="pop-notif" ${n.url ? `data-url="${esc(n.url)}" style="cursor:pointer"` : ""}>
+      <b>${n.isNew ? '<span class="newdot"></span>' : ""}${esc(n.subject)}</b>
+      ${n.text && n.text !== n.subject ? `<span>${esc(n.text.slice(0, 160))}</span>` : ""}<small>${esc(ago(n.time))}</small></div>`).join("")
+      || `<div class="empty" style="padding:28px 10px">${ic("bell")}<div>لا توجد إشعارات</div></div>`}`;
+  if (first && S.newNotif) api("/api/notifications/seen", {}).then(refresh).catch(() => {});
+}
+function drawAccountPop() {
+  const item = (icon, label, attr, cls = "") => `<button class="pop-item ${cls}" ${attr}>${ic(icon)}<span>${label}</span></button>`;
+  $("#pop").innerHTML = (S.linked
+    ? `<div class="pop-user"><span class="qb-av">${esc(initial(S.fullName)) || ic("user")}</span><div style="min-width:0"><b dir="auto">${esc(S.fullName)}</b>
+        <small dir="auto">${esc(S.siteName || "")}</small><small dir="ltr" style="text-align:right">${esc(S.username || "")}</small></div></div>`
+    : `<div class="pop-user"><span class="qb-av">${ic("user")}</span><div><b>غير مربوط بالمودل</b><small>اربط حسابك لتبدأ المزامنة</small></div></div>`) +
+    `<div class="pop-sep"></div>
+    ${item("gear", "الإعدادات", 'data-pop-go="settings"')}
+    ${item("cap", S.linked ? "تغيير حساب المودل" : "ربط حساب المودل", 'data-pop-go="setup"')}
+    ${item("link", "روابطي", 'data-pop-go="links"')}
+    ${item("images", "صوري", 'data-pop-go="images"')}
+    ${item("message", "الملاحظات الفنية", 'data-pop-go="feedback"')}
+    <div class="pop-sep"></div>
+    ${item("power", "إيقاف البرنامج", 'data-pop-quit', "danger")}`;
+}
+$("#qb-notif").addEventListener("click", (e) => { e.stopPropagation(); openPop("notif", e.currentTarget); });
+$("#qb-account").addEventListener("click", (e) => { e.stopPropagation(); openPop("account", e.currentTarget); });
+$("#qb-settings").addEventListener("click", () => { closePop(); go("settings"); });
+$("#qb-power").addEventListener("click", () => { closePop(); quitApp(); });
+$("#pop").addEventListener("click", (e) => {
+  const g = e.target.closest("[data-pop-go]");
+  if (g) { e.preventDefault(); e.stopPropagation(); closePop(); go(g.dataset.popGo); return; }
+  if (e.target.closest("[data-pop-quit]")) { e.stopPropagation(); closePop(); quitApp(); return; }
+  if (e.target.closest("[data-url]")) setTimeout(closePop, 50);
+});
+document.addEventListener("click", (e) => { if (popKind && !e.target.closest("#quickbar")) closePop(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && popKind) closePop(); });
+
+/* ================= images ================= */
+let IMG = null;
+let imgFilter = "all", imgQuery = "", imgUploadCat = "";
+const imgUrl = (it) => `/api/images/raw?p=${encodeURIComponent(it.rel)}&t=${window.API_TOKEN}&v=${it.mtime}`;
+async function loadImages() {
+  try { IMG = await api("/api/images"); } catch (e) { IMG = IMG || { items: [], categories: [] }; }
+  IMG.items = IMG.items || [];
+  IMG.categories = IMG.categories || [];
+  return IMG;
+}
+
+function pinnedCard() {
+  const pins = (IMG?.items || []).filter((i) => i.pinned);
+  if (!pins.length) return "";
+  return `<div class="card" style="margin-bottom:20px">${cardHead("pin", "صور مثبّتة", `<a data-go="images" class="small">كل الصور</a>`)}
+    <div class="pinned-strip">${pins.map((it, i) => `<div class="shot" data-pin-open="${i}" title="${esc(it.name)}">
+      <img class="thumb" loading="lazy" src="${imgUrl(it)}" alt=""><div class="cap"><b dir="auto">${esc(it.name)}</b><small>${esc(it.category)}</small></div></div>`).join("")}</div></div>`;
+}
+document.addEventListener("click", (e) => {
+  const p = e.target.closest("[data-pin-open]");
+  if (p) openLightbox(IMG.items.filter((i) => i.pinned), +p.dataset.pinOpen);
+});
+
+async function uploadImages(files, cat) {
+  files = [...files].filter((f) => /^image\//.test(f.type) || /\.(png|jpe?g|jfif|webp|gif|bmp)$/i.test(f.name));
+  if (!files.length) { toast("اختر صوراً (PNG أو JPG أو WEBP…)", "alert"); return; }
+  const fd = new FormData();
+  fd.append("category", cat || "أخرى");
+  for (const f of files) fd.append("file", f, f.name);
+  toast(`جارٍ حفظ ${files.length} صورة…`, "upload");
+  let r;
+  try {
+    const res = await fetch("/api/images/upload", { method: "POST", headers: { "X-UniHub-Token": window.API_TOKEN }, body: fd });
+    r = await res.json();
+    if (!res.ok) throw new Error(r.error || "تعذر الحفظ");
+  } catch (e) { toast(e.message, "alert"); return; }
+  if (r.errors?.length) toast(r.errors[0], "alert", 6000);
+  else toast(`تم حفظ ${r.saved.length} صورة في «${cat || "أخرى"}»`, "check-circle");
+  await loadImages();
+  if (current === "images") drawImages($("#view"));
+}
+
+function stamp() {
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`;
+}
+document.addEventListener("paste", (e) => {
+  if (current !== "images" || ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  const files = [...(e.clipboardData?.items || [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  const named = files.map((f, i) => new File([f], `لقطة ${stamp()}${files.length > 1 ? "-" + (i + 1) : ""}.${(f.type.split("/")[1] || "png").replace("jpeg", "jpg")}`, { type: f.type }));
+  uploadImages(named, imgUploadCat);
+});
+
+views.images = (v) => {
+  v.innerHTML = head("صوري", "كل صور الجامعة في مكان واحد: جدول الامتحانات، الخطة الدراسية، إشعارات الدفع، البطاقات…") + empty("refresh", "جارٍ التحميل…");
+  loadImages().then(() => { if (current === "images") drawImages(v); });
+};
+
+function drawImages(v) {
+  const cats = IMG.categories;
+  if (!imgUploadCat) imgUploadCat = imgFilter !== "all" ? imgFilter : cats[0]?.name || "أخرى";
+  const q = imgQuery.trim().toLowerCase();
+  const list = IMG.items.filter((i) => (imgFilter === "all" || i.category === imgFilter) && (!q || i.name.toLowerCase().includes(q)));
+  v.innerHTML = head("صوري", "كل صور الجامعة في مكان واحد: جدول الامتحانات، الخطة الدراسية، إشعارات الدفع، البطاقات…",
+    `<button class="btn" data-reveal="${esc(IMG.root)}">${ic("folder")}فتح المجلد</button>`) + `
+  <div class="dropzone" id="dz">
+    <div class="dz-ic">${ic("upload", "lg")}</div>
+    <div class="dz-txt"><b>أضف صورة</b><span>اسحبها وأفلتها هنا، أو اختر من جهازك، أو الصق لقطة شاشة بـ <kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
+    <select class="in" id="up-cat" style="width:auto;min-width:170px">${cats.map((c) => `<option ${c.name === imgUploadCat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}<option value="__new">+ تصنيف جديد…</option></select>
+    <button class="btn primary" id="up-btn">${ic("plus")}اختيار صور</button>
+    <input type="file" id="up-file" accept="image/*" multiple hidden>
+  </div>
+  <div class="filters">
+    <div class="seg" style="flex-wrap:wrap"><button data-cat="all" class="${imgFilter === "all" ? "on" : ""}">الكل <span class="muted">${IMG.items.length}</span></button>
+      ${cats.map((c) => `<button data-cat="${esc(c.name)}" class="${imgFilter === c.name ? "on" : ""}">${esc(c.name)} <span class="muted">${c.count}</span></button>`).join("")}</div>
+    <span class="spacer"></span>
+    <input class="in" id="img-q" placeholder="ابحث في أسماء الصور" value="${esc(imgQuery)}" style="width:220px">
+  </div>
+  ${list.length ? `<div class="gallery">${list.map((it, i) => `<div class="shot" data-open-img="${i}" title="${esc(it.name)}">
+      <img class="thumb" loading="lazy" src="${imgUrl(it)}" alt="">
+      ${it.pinned ? `<span class="pin-badge" title="مثبّتة في الرئيسية">${ic("pin")}</span>` : ""}
+      <div class="cap"><b dir="auto">${esc(it.name)}</b><small>${esc(it.category)}${SEP}${esc(dateOnly(it.mtime))}</small></div></div>`).join("")}</div>`
+    : `<div class="card">${empty("images", IMG.items.length ? "لا توجد صور تطابق البحث" : "لا توجد صور بعد. أضف صورة جدول الامتحانات أو خطتك الدراسية لتجدها هنا دائماً")}</div>`}`;
+
+  const dz = $("#dz", v), file = $("#up-file", v), sel = $("#up-cat", v);
+  sel.addEventListener("change", async () => {
+    if (sel.value !== "__new") { imgUploadCat = sel.value; return; }
+    const name = prompt("اسم التصنيف الجديد (مثال: شهادات، نتائج):");
+    if (!name || !name.trim()) { sel.value = imgUploadCat; return; }
+    try { const r = await api("/api/images/category", { name }); imgUploadCat = r.name; await loadImages(); drawImages(v); }
+    catch (e) { toast(e.message, "alert"); sel.value = imgUploadCat; }
+  });
+  $("#up-btn", v).addEventListener("click", () => file.click());
+  file.addEventListener("change", () => { if (file.files.length) uploadImages(file.files, imgUploadCat); });
+  ["dragenter", "dragover"].forEach((t) => v.addEventListener(t, (e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); dz.classList.add("over"); } }));
+  ["dragleave", "drop"].forEach((t) => v.addEventListener(t, (e) => { if (t === "dragleave" && v.contains(e.relatedTarget)) return; dz.classList.remove("over"); }));
+  v.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); uploadImages(e.dataTransfer.files, imgUploadCat); } });
+  $$("[data-cat]", v).forEach((b) => b.addEventListener("click", () => {
+    imgFilter = b.dataset.cat;
+    if (imgFilter !== "all") imgUploadCat = imgFilter;
+    drawImages(v);
+  }));
+  const qi = $("#img-q", v);
+  qi.addEventListener("input", () => { imgQuery = qi.value; clearTimeout(qi._t); qi._t = setTimeout(() => { drawImages(v); const n = $("#img-q", v); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 180); });
+  $$("[data-open-img]", v).forEach((el) => el.addEventListener("click", () => openLightbox(list, +el.dataset.openImg)));
+}
+
+/* lightbox */
+let LB = null;
+function openLightbox(list, i) {
+  if (!list.length) return;
+  closePop();
+  LB = { list, i, zoom: false };
+  let el = $("#lightbox");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "lightbox";
+    el.className = "lightbox";
+    document.body.appendChild(el);
+    el.addEventListener("click", lbClick);
+  }
+  el.classList.remove("hide");
+  drawLightbox();
+}
+function closeLightbox() { $("#lightbox")?.classList.add("hide"); LB = null; }
+function drawLightbox() {
+  const it = LB.list[LB.i], n = LB.list.length;
+  $("#lightbox").innerHTML = `<div class="lb-bar">
+      <button class="lb-btn" data-lb="close" title="إغلاق (Esc)">${ic("x")}</button>
+      <div class="lb-title"><b dir="auto">${esc(it.name)}</b><small>${esc(it.category)} · ${esc(dateOnly(it.mtime))} · <span dir="ltr">${esc(size(it.size))}</span>${n > 1 ? ` · ${LB.i + 1} من ${n}` : ""}</small></div>
+      <button class="lb-btn ${LB.zoom ? "on" : ""}" data-lb="zoom" title="تكبير">${ic("zoom")}</button>
+      <button class="lb-btn ${it.pinned ? "on" : ""}" data-lb="pin" title="${it.pinned ? "إلغاء التثبيت من الرئيسية" : "تثبيت في الرئيسية"}">${ic("pin")}</button>
+      <button class="lb-btn" data-lb="edit" title="إعادة التسمية أو تغيير التصنيف">${ic("pencil")}</button>
+      <button class="lb-btn" data-lb="open" title="فتح في عارض الصور">${ic("external")}</button>
+      <button class="lb-btn" data-lb="reveal" title="إظهار في المجلد">${ic("folder")}</button>
+      <button class="lb-btn danger" data-lb="del" title="حذف (إلى سلة المحذوفات)">${ic("trash")}</button>
+    </div>
+    <div class="lb-stage ${LB.zoom ? "zoomed" : ""}"><img src="${imgUrl(it)}" alt="" data-lb="zoom"></div>
+    ${n > 1 ? `<button class="lb-btn lb-nav prev" data-lb="prev" title="السابقة">${ic("prev")}</button><button class="lb-btn lb-nav next" data-lb="next" title="التالية">${ic("next")}</button>` : ""}`;
+}
+async function lbClick(e) {
+  const b = e.target.closest("[data-lb]");
+  if (!b) { if (e.target.classList.contains("lb-stage")) closeLightbox(); return; }
+  const it = LB.list[LB.i], act = b.dataset.lb;
+  if (act === "close") closeLightbox();
+  else if (act === "prev" || act === "next") { LB.i = (LB.i + (act === "next" ? 1 : -1) + LB.list.length) % LB.list.length; LB.zoom = false; drawLightbox(); }
+  else if (act === "zoom") { LB.zoom = !LB.zoom; drawLightbox(); }
+  else if (act === "open") openFile(it.path);
+  else if (act === "reveal") openFile(it.path, true);
+  else if (act === "pin") {
+    await api("/api/images/pin", { rel: it.rel, pinned: !it.pinned });
+    it.pinned = !it.pinned;
+    toast(it.pinned ? "ثُبّتت الصورة في الصفحة الرئيسية" : "أُلغي التثبيت", "pin");
+    drawLightbox(); afterImageChange();
+  } else if (act === "del") {
+    if (!confirm(`حذف «${it.name}»؟ ستنتقل إلى سلة المحذوفات ويمكنك استرجاعها منها.`)) return;
+    try { await api("/api/images/delete", { rel: it.rel }); } catch (err) { toast(err.message, "alert"); return; }
+    LB.list.splice(LB.i, 1);
+    toast("نُقلت الصورة إلى سلة المحذوفات", "trash");
+    if (!LB.list.length) closeLightbox(); else { LB.i %= LB.list.length; drawLightbox(); }
+    afterImageChange();
+  } else if (act === "edit") editImage(it);
+}
+function editImage(it) {
+  const cats = IMG.categories.map((c) => c.name);
+  modal(`<h2>${ic("pencil")}تعديل الصورة</h2>
+    <label class="f">الاسم</label><input id="ed-name" class="in" maxlength="80" value="${esc(it.name)}">
+    <label class="f">التصنيف</label><select id="ed-cat" class="in">${cats.map((c) => `<option ${c === it.category ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+    <div class="err" id="ed-err" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn ghost" data-close>إلغاء</button><button class="btn primary" id="ed-save">${ic("check")}حفظ</button></div>`);
+  $("#ed-name").focus();
+  $("#ed-save").addEventListener("click", async () => {
+    try {
+      const r = await api("/api/images/edit", { rel: it.rel, name: $("#ed-name").value, category: $("#ed-cat").value });
+      closeModal();
+      await loadImages();
+      const fresh = IMG.items.find((x) => x.rel === r.rel);
+      if (fresh && LB) { LB.list[LB.i] = fresh; drawLightbox(); }
+      toast("تم الحفظ");
+      afterImageChange(false);
+    } catch (e) { $("#ed-err").textContent = e.message; }
+  });
+}
+async function afterImageChange(reload = true) {
+  if (reload) await loadImages();
+  if (current === "images") drawImages($("#view"));
+  else if (current === "home") render();
+}
+document.addEventListener("keydown", (e) => {
+  if (!LB || !$("#modal").classList.contains("hide")) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowLeft") $("#lightbox [data-lb=next]")?.click();
+  else if (e.key === "ArrowRight") $("#lightbox [data-lb=prev]")?.click();
+});
+
 /* ================= start ================= */
 function fromHash() {
   const h = decodeURIComponent(location.hash.slice(1));
@@ -1058,11 +1342,12 @@ window.addEventListener("popstate", () => { if (!fromHash()) go("home", {}, true
   applyTheme(localStorage.getItem("uh-theme") || "auto", false);
   await refresh();
   if (!S) return;
+  loadImages().then(() => { if (current === "home") render(); });
   // check for a new version whenever the window opens (at most every 15 minutes)
   if (S.repo && !S.update.installing && Date.now() / 1000 - (S.update.lastCheck || 0) > 900) {
     api("/api/update/check", {}).then(refresh).catch(() => {});
   }
-  if (!S.linked && !location.hash.match(/feedback|settings|search|import|links/)) go("setup");
+  if (!S.linked && !location.hash.match(/feedback|settings|search|import|links|images/)) go("setup");
   else if (!fromHash()) go("home", {}, true);
   setInterval(() => { if (!offline) refresh(); }, 5000);
 })();
