@@ -138,6 +138,7 @@ func newServer(port int) http.Handler {
 			"ghLogin":       c.GHLogin,
 			"hasGH":         c.GHToken != "",
 			"fbUnread":      unreadFeedback(),
+			"links":         c.Links,
 		}
 		stMu.RUnlock()
 		writeJSON(w, resp)
@@ -199,6 +200,7 @@ func newServer(port int) http.Handler {
 			Theme       *string  `json:"theme"`
 			AutoUpdate  *bool    `json:"autoUpdate"`
 			Repo        *string  `json:"repo"`
+			Links       *[]Link  `json:"links"`
 		}
 		if readBody(r, &req) != nil {
 			writeErr(w, 400, "طلب غير صالح")
@@ -223,6 +225,14 @@ func newServer(port int) http.Handler {
 		}
 		if req.Autostart != nil {
 			setAutostart(*req.Autostart)
+		}
+		var links []Link
+		if req.Links != nil {
+			var err error
+			if links, err = cleanLinks(*req.Links); err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
 		}
 		var repo string
 		if req.Repo != nil && strings.TrimSpace(*req.Repo) != "" {
@@ -259,8 +269,13 @@ func newServer(port int) http.Handler {
 			if req.Repo != nil {
 				c.Repo = repo
 			}
+			if req.Links != nil {
+				c.Links = links
+			}
 		})
-		go indexer.Rescan()
+		if req.RootDir != nil || req.ExtraDirs != nil {
+			go indexer.Rescan()
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 

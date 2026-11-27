@@ -25,6 +25,14 @@ type Config struct {
 	GHLogin       string   `json:"ghLogin"`
 	AutoUpdate    bool     `json:"autoUpdate"`
 	Theme         string   `json:"theme"` // auto | light | dark
+	Links         []Link   `json:"links"` // the user's own university links (portal, pages, sites)
+}
+
+// Link is a personal shortcut shown in the sidebar and on the home page.
+type Link struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	Kind  string `json:"kind"` // portal | social | site | mail | other
 }
 
 var (

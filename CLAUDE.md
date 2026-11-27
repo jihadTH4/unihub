@@ -11,6 +11,7 @@ Desktop app (Windows) that syncs Moodle courses/assignments/notifications into a
 - `update.go` — GitHub Releases auto-update: assets `UniHub.exe` + `checksums.txt` (SHA-256 verified), backup of data dir, rename running exe to `.old`, restart.
 - `feedback.go` — "الملاحظات الفنية": GitHub Issues titled `[ملاحظة:<نوع>] <عنوان>`, label `ملاحظة فنية`, offline outbox, polling + toasts. Diagnostics after `\n---\n` in the body are hidden in the app.
 - `platform_windows.go` — toasts, folder picker, autostart, DPAPI secret encryption, self-install to `%LOCALAPPDATA%\Programs\UniHub`.
+- `links.go` — the user's own links (`Config.Links`), http(s) only, per-device; never hardcode one university's links.
 - `web/` — `index.html` (SVG icon sprite), `style.css` (navy/gold design system, light/dark/auto), `app.js` (views).
 - User data: `%AppData%\UniHub` (config.json, state.json, feedback.json, index.gob, backups/). Updates must never break these formats — add fields, don't rename.
 

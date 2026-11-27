@@ -182,9 +182,10 @@ async function refresh() {
   $("#index-line").textContent = ix.running ? `فهرسة ${ix.done} من ${ix.total}` : `${ix.docs.toLocaleString("en")} ملف جاهز للبحث`;
   $("#btn-sync").disabled = sy.running || !S.linked;
   $("#btn-sync").classList.toggle("spinning", sy.running);
+  renderNavLinks();
   renderBanners();
   if (S.update.justUpdated && !$("#modal").dataset.shown) showWhatsNew();
-  if (!S.linked && !["settings", "setup", "search", "import", "feedback"].includes(current)) go("setup");
+  if (!S.linked && !["settings", "setup", "search", "import", "feedback", "links"].includes(current)) go("setup");
   else if (["home", "assignments", "notifications", "courses"].includes(current) && !document.activeElement?.closest("#view")) render();
 }
 
@@ -215,6 +216,7 @@ function go(view, p = {}, fromHash = false) {
   }
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view || (view === "course" && a.dataset.view === "courses")));
   const v = $("#view");
+  v.onclick = null;
   v.style.animation = "none";
   void v.offsetWidth;
   v.style.animation = "";
@@ -235,7 +237,7 @@ function render(fresh) {
   if (!S) return;
   const v = $("#view");
   const fn = views[current] || views.home;
-  if (fresh || !["search", "import", "settings", "setup", "course", "feedback"].includes(current)) {
+  if (fresh || !["search", "import", "settings", "setup", "course", "feedback", "links"].includes(current)) {
     const html = fn(v, fresh);
     if (typeof html === "string") v.innerHTML = html;
   }
@@ -359,6 +361,8 @@ views.home = () => {
     <div class="stat"><div class="ic blue">${ic("search", "lg")}</div><div><b>${S.index.docs.toLocaleString("en")}</b><span>ملف قابل للبحث</span></div></div>
     <div class="stat"><div class="ic green">${ic("bell", "lg")}</div><div><b>${S.newNotif || 0}</b><span>إشعار جديد</span></div></div>
   </div>
+  ${(S.links || []).length ? `<div class="card" style="margin-bottom:20px">${cardHead("link", "روابطي", `<a data-go="links" class="small">تعديل</a>`)}
+    <div class="quick-links">${S.links.map(qlink).join("")}</div></div>` : ""}
   <div class="grid g2">
     <div class="card">${cardHead("calendar", "المواعيد القادمة", up.length > 6 ? `<a data-go="assignments" class="small">عرض الكل</a>` : "")}
       <div class="list">${up.slice(0, 6).map(deadlineRow).join("") || empty("check-circle", "لا توجد مواعيد قادمة. استمتع بوقتك")}</div></div>
@@ -741,6 +745,142 @@ function bindConnect(v) {
   });
 }
 
+
+/* ================= links ================= */
+const LINK_KINDS = {
+  portal: ["idcard", "gold", "بوابة الطالب"],
+  site: ["globe", "green", "موقع"],
+  social: ["users", "blue", "صفحة تواصل"],
+  mail: ["mail", "violet", "بريد"],
+  other: ["link", "gray", "رابط آخر"],
+};
+function linkIc(kind, size = "") {
+  const [i, c] = LINK_KINDS[kind] || LINK_KINDS.other;
+  const fg = c === "gray" ? "var(--muted)" : c === "gold" ? "var(--gold-ink)" : `var(--${c})`;
+  const bg = c === "gray" ? "var(--surface-2)" : `var(--${c}-soft)`;
+  return `<div class="kind-ic" style="background:${bg};color:${fg}">${ic(i, size)}</div>`;
+}
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; } };
+const qlink = (l) => `<a class="qlink" data-url="${esc(l.url)}" title="${esc(l.url)}">${linkIc(l.kind)}<div><b dir="auto">${esc(l.title)}</b><small>${esc(hostOf(l.url))}</small></div></a>`;
+
+function guessKind(raw) {
+  let u;
+  try { u = new URL(/:\/\//.test(raw) ? raw : "https://" + raw); } catch (e) { return "other"; }
+  const h = u.hostname.toLowerCase(), p = u.pathname.toLowerCase();
+  if (/(facebook|fb|instagram|twitter|youtube|linkedin|tiktok|telegram)\.|^x\.com$|^t\.me$/.test(h)) return "social";
+  if (/^(mail|outlook)\./.test(h) || p.includes("/mail")) return "mail";
+  if (h.includes("portal") || /portal|student|login/.test(p) || /^(sis|my)\./.test(h)) return "portal";
+  return "site";
+}
+
+let navLinksKey = null;
+function renderNavLinks() {
+  const links = S.links || [];
+  const key = JSON.stringify(links);
+  if (key === navLinksKey) return;
+  navLinksKey = key;
+  $("#nav-links").innerHTML = links.map((l) => {
+    const [i] = LINK_KINDS[l.kind] || LINK_KINDS.other;
+    return `<a class="ext-link" data-url="${esc(l.url)}" title="${esc(l.url)}">${ic(i)}<span dir="auto">${esc(l.title)}</span><svg class="icon go"><use href="#i-external"/></svg></a>`;
+  }).join("") || `<a class="muted-link" data-go="links">${ic("plus")}<span>أضف روابط جامعتك</span></a>`;
+}
+
+// Suggests the university's main website from the Moodle address (moodle.uni.edu → uni.edu).
+function linkSuggestions(have) {
+  const out = [];
+  const known = new Set(have.map((l) => hostOf(l.url) + new URL(l.url).pathname.replace(/\/$/, "")));
+  const add = (title, url, kind) => { try { const u = new URL(url); if (!known.has(hostOf(url) + u.pathname.replace(/\/$/, ""))) out.push({ title, url, kind }); } catch (e) {} };
+  if (S.moodleUrl) {
+    try {
+      const h = new URL(S.moodleUrl).hostname;
+      const parts = h.split(".");
+      if (parts.length > 2 && /^(moodle|lms|elearning|e-learning|learn|el|online|courses|vle|cms|eclass|portal)\d*$/i.test(parts[0])) {
+        add("موقع الجامعة", "https://" + parts.slice(1).join("."), "site");
+      }
+    } catch (e) {}
+  }
+  return out;
+}
+
+views.links = (v) => {
+  let links = (S.links || []).map((l) => ({ ...l }));
+  let editing = -1;
+  const draw = () => {
+    const sugg = linkSuggestions(links);
+    v.innerHTML = head("روابطي", "روابطك الخاصة بجامعتك: بوابة الطالب، صفحات الجامعة، والمواقع التي تزورها كثيراً. تظهر في الشريط الجانبي وفي الرئيسية، وهي خاصة بجهازك فقط.") + `
+    <div class="grid" style="grid-template-columns:minmax(300px,380px) 1fr;align-items:start">
+      <div class="card">${cardHead(editing >= 0 ? "pencil" : "plus", editing >= 0 ? "تعديل الرابط" : "إضافة رابط")}
+        <label class="f" style="margin-top:0">الرابط</label>
+        <input id="l-url" class="in" dir="ltr" placeholder="https://..." value="${editing >= 0 ? esc(links[editing].url) : ""}">
+        <label class="f">الاسم الظاهر</label>
+        <input id="l-title" class="in" maxlength="60" placeholder="مثال: بوابة الطالب" value="${editing >= 0 ? esc(links[editing].title) : ""}">
+        <label class="f">النوع</label>
+        <div class="seg" id="l-kind" style="flex-wrap:wrap">${Object.entries(LINK_KINDS).map(([k, [i, , t]]) => `<button data-k="${k}">${ic(i)}${t}</button>`).join("")}</div>
+        <div class="row" style="margin-top:16px"><button class="btn primary" id="l-save">${ic(editing >= 0 ? "check" : "plus")}${editing >= 0 ? "حفظ التعديل" : "إضافة"}</button>
+          ${editing >= 0 ? `<button class="btn ghost" id="l-cancel">إلغاء</button>` : ""}<span class="err" id="l-err"></span></div>
+        <div class="hint row" style="margin-top:14px;align-items:flex-start">${ic("lock")}<span>الصفحات التي تحتاج تسجيل دخول (مثل بوابة الطالب) تُفتح في متصفحك، ويمكنك جعل المتصفح يحفظ كلمة المرور. البرنامج لا يطلب كلمات المرور هذه ولا يخزنها.</span></div>
+      </div>
+      <div>
+        <div class="card">${cardHead("link", `روابطك <span class="pill gray">${links.length}</span>`)}
+          <div class="list">${links.map((l, i) => `<div class="item">${linkIc(l.kind)}
+            <div class="body"><div class="title" dir="auto">${esc(l.title)}</div><div class="meta"><span dir="ltr">${esc(l.url)}</span></div></div>
+            <div class="actions">
+              <button class="btn sm ghost sq" data-mv="${i}" data-d="-1" title="لأعلى" ${i === 0 ? "disabled" : ""}>${ic("arrow-up")}</button>
+              <button class="btn sm ghost sq" data-mv="${i}" data-d="1" title="لأسفل" ${i === links.length - 1 ? "disabled" : ""}>${ic("arrow-down")}</button>
+              <button class="btn sm ghost sq" data-ed="${i}" title="تعديل">${ic("pencil")}</button>
+              <button class="btn sm ghost sq" data-del="${i}" title="حذف">${ic("trash")}</button>
+              <button class="btn sm" data-url="${esc(l.url)}">${ic("external")}فتح</button>
+            </div></div>`).join("") || empty("link", "لا توجد روابط بعد. أضف أول رابط من النموذج")}</div></div>
+        ${sugg.length ? `<div class="card" style="margin-top:16px">${cardHead("sparkles", "اقتراحات من رابط المودل")}<div class="list">
+          ${sugg.map((l, i) => `<div class="item">${linkIc(l.kind)}<div class="body"><div class="title">${esc(l.title)}</div><div class="meta"><span dir="ltr">${esc(l.url)}</span></div></div>
+            <div class="actions"><button class="btn sm" data-sg="${i}">${ic("plus")}إضافة</button></div></div>`).join("")}</div>
+          <p class="hint">تأكد أن الرابط المقترح يفتح موقع جامعتك قبل إضافته.</p></div>` : ""}
+      </div>
+    </div>`;
+
+    let kind = editing >= 0 ? links[editing].kind : "site";
+    let kindTouched = editing >= 0;
+    const setKind = (k) => { kind = k; $$("#l-kind button", v).forEach((b) => b.classList.toggle("on", b.dataset.k === k)); };
+    setKind(kind);
+    $$("#l-kind button", v).forEach((b) => b.addEventListener("click", () => { kindTouched = true; setKind(b.dataset.k); }));
+    $("#l-url", v).addEventListener("input", (e) => { if (!kindTouched) setKind(guessKind(e.target.value.trim())); });
+    $("#l-cancel", v)?.addEventListener("click", () => { editing = -1; draw(); });
+    $("#l-save", v).addEventListener("click", async () => {
+      const url = $("#l-url", v).value.trim();
+      if (!url) { $("#l-err", v).textContent = "اكتب الرابط"; return; }
+      const item = { url, title: $("#l-title", v).value.trim(), kind };
+      const next = links.map((l) => ({ ...l }));
+      if (editing >= 0) next[editing] = item; else next.push(item);
+      if (await save(next)) { editing = -1; draw(); toast("تم حفظ الرابط", "link"); }
+      else $("#l-err", v).textContent = save.err;
+    });
+    v.onclick = async (e) => {
+      const b = e.target.closest("[data-mv],[data-ed],[data-del],[data-sg]");
+      if (!b || b.disabled) return;
+      const next = links.map((l) => ({ ...l }));
+      if (b.dataset.mv !== undefined) {
+        const i = +b.dataset.mv, j = i + +b.dataset.d;
+        [next[i], next[j]] = [next[j], next[i]];
+      } else if (b.dataset.ed !== undefined) { editing = +b.dataset.ed; draw(); return; }
+      else if (b.dataset.del !== undefined) {
+        if (!confirm(`حذف «${links[+b.dataset.del].title}»؟`)) return;
+        next.splice(+b.dataset.del, 1);
+        if (editing === +b.dataset.del) editing = -1;
+      } else if (b.dataset.sg !== undefined) next.push(sugg[+b.dataset.sg]);
+      if (await save(next)) draw(); else toast(save.err, "alert");
+    };
+  };
+  const save = async (next) => {
+    try {
+      await api("/api/settings", { links: next });
+      await refresh();
+      links = (S.links || []).map((l) => ({ ...l }));
+      return true;
+    } catch (e) { save.err = e.message; return false; }
+  };
+  draw();
+};
+
 /* ================= settings ================= */
 const toggle = (id, title, sub, on) => `<label class="toggle"><span class="t"><b>${title}</b><span>${sub}</span></span><span class="switch"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><i></i></span></label>`;
 
@@ -909,7 +1049,7 @@ window.addEventListener("popstate", () => { if (!fromHash()) go("home", {}, true
   applyTheme(localStorage.getItem("uh-theme") || "auto", false);
   await refresh();
   if (!S) return;
-  if (!S.linked && !location.hash.match(/feedback|settings|search|import/)) go("setup");
+  if (!S.linked && !location.hash.match(/feedback|settings|search|import|links/)) go("setup");
   else if (!fromHash()) go("home", {}, true);
   setInterval(() => { if (!offline) refresh(); }, 5000);
 })();
