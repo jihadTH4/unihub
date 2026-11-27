@@ -7,9 +7,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -77,6 +80,16 @@ func main() {
 		}
 	}
 
+	// remember which version ran last, so an update installed from outside (the Android
+	// installer, or a new exe copied over the old one) still shows "what's new"
+	vf := filepath.Join(dataDir, "last-version")
+	if b, err := os.ReadFile(vf); err == nil {
+		if prev := strings.TrimSpace(string(b)); *updatedFrom == "" && prev != "" && newerVersion(Version, prev) {
+			*updatedFrom = prev
+		}
+	}
+	os.WriteFile(vf, []byte(Version), 0o644)
+
 	loadConfig()
 	loadState()
 	loadFeedback()
@@ -86,6 +99,16 @@ func main() {
 	go scheduler()
 	go feedbackLoop()
 	go updateLoop()
+	go func() {
+		// the Android app stops the engine with SIGTERM: save everything before leaving
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		<-ch
+		indexer.Save()
+		saveState()
+		saveFeedback()
+		os.Exit(0)
+	}()
 
 	log.Println("UniHub", Version, "running at", url)
 	if !*background {

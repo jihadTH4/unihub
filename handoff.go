@@ -38,7 +38,11 @@ func pingRunning(base string) (string, bool) {
 // stopRunning asks the running copy to quit, using the session token it gives its own page.
 func stopRunning(base string) error {
 	c := &http.Client{Timeout: 3 * time.Second}
-	resp, err := c.Get(base)
+	pageURL := base
+	if hasHost() {
+		pageURL += "?k=" + hostKey
+	}
+	resp, err := c.Get(pageURL)
 	if err != nil {
 		return err
 	}

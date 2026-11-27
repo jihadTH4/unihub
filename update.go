@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,6 +85,15 @@ type UpdateState struct {
 	LastCheck   int64        `json:"lastCheck"`
 	JustUpdated string       `json:"justUpdated"` // previous version, right after an update
 	Notes       string       `json:"notes"`       // notes of the version we just updated to
+	Ready       string       `json:"ready"`       // Android: version downloaded and waiting for the user to install
+}
+
+// updateAsset is the release file this build updates itself from.
+func updateAsset() string {
+	if runtime.GOOS == "android" {
+		return "UniHub.apk"
+	}
+	return "UniHub.exe"
 }
 
 var (
@@ -172,7 +182,7 @@ func checkUpdate() (*ReleaseInfo, error) {
 	info := &ReleaseInfo{Version: strings.TrimPrefix(rel.TagName, "v"), Notes: rel.Body, URL: rel.HTMLURL, Published: rel.PublishedAt}
 	for _, a := range rel.Assets {
 		switch strings.ToLower(a.Name) {
-		case "unihub.exe":
+		case strings.ToLower(updateAsset()):
 			info.exeURL = a.URL
 		case "checksums.txt":
 			info.sumURL = a.URL
@@ -281,6 +291,12 @@ func applyUpdate() error {
 		updMu.Unlock()
 		return errors.New("التحديث يعمل الآن")
 	}
+	if upd.Ready != "" && upd.Ready == info.Version {
+		// Android: already downloaded and verified, just ask the phone to install it again
+		updMu.Unlock()
+		hostSend(hostCmd{Op: "install", Path: filepath.Join(dataDir, "update", updateAsset()), Version: info.Version})
+		return nil
+	}
 	upd.Installing, upd.Progress, upd.Error = true, 0, ""
 	updMu.Unlock()
 	fail := func(err error) error {
@@ -291,7 +307,7 @@ func applyUpdate() error {
 	dir := filepath.Join(dataDir, "update")
 	os.RemoveAll(dir)
 	os.MkdirAll(dir, 0o755)
-	newExe := filepath.Join(dir, "UniHub.exe")
+	newExe := filepath.Join(dir, updateAsset())
 	sums := filepath.Join(dir, "checksums.txt")
 	if err := downloadTo(info.sumURL, sums, nil); err != nil {
 		return fail(err)
@@ -303,7 +319,7 @@ func applyUpdate() error {
 	b, _ := os.ReadFile(sums)
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
-		if len(f) == 2 && strings.EqualFold(strings.TrimPrefix(f[1], "*"), "UniHub.exe") {
+		if len(f) == 2 && strings.EqualFold(strings.TrimPrefix(f[1], "*"), updateAsset()) {
 			want = strings.ToLower(f[0])
 		}
 	}
@@ -313,6 +329,17 @@ func applyUpdate() error {
 	}
 
 	backupData(Version)
+	if runtime.GOOS == "android" {
+		// Android installs apps itself: hand the verified package to the app, which opens
+		// the system installer (the user confirms with one tap).
+		os.Remove(sums)
+		log.Println("update", info.Version, "downloaded, waiting for the user to install")
+		setUpd(func(u *UpdateState) { u.Installing = false; u.Progress = 100; u.Ready = info.Version })
+		if !hostSend(hostCmd{Op: "install", Path: newExe, Version: info.Version}) {
+			return fail(errNoHostUpdate)
+		}
+		return nil
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return fail(err)
@@ -370,6 +397,8 @@ func restartInto(exe string, args ...string) {
 	}
 	os.Exit(1)
 }
+
+var errNoHostUpdate = errors.New("ثبّت التحديث من داخل تطبيق منظّم الجامعة")
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
@@ -443,6 +472,9 @@ func installSelf() error {
 }
 
 func isInstalled() bool {
+	if runtime.GOOS == "android" {
+		return true
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return false
@@ -458,7 +490,9 @@ func updateLoop() {
 			info, err := checkUpdate()
 			if err == nil && info != nil {
 				c := getConfig()
-				if c.AutoUpdate {
+				if getUpdateState().Ready == info.Version {
+					// Android: already downloaded, the app shows "install" until the user taps it
+				} else if c.AutoUpdate {
 					// wait for a quiet moment (not in the middle of a Moodle sync)
 					for getStatus().Running {
 						time.Sleep(30 * time.Second)

@@ -55,6 +55,9 @@ func initDataDir() error {
 }
 
 func defaultRootDir() string {
+	if d := os.Getenv("UNIHUB_ROOT"); d != "" { // set by the Android app
+		return filepath.Join(d, "الجامعة - مرتب")
+	}
 	home, _ := os.UserHomeDir()
 	desk := filepath.Join(home, "Desktop")
 	if _, err := os.Stat(desk); err != nil {

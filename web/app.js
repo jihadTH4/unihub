@@ -136,9 +136,19 @@ function applyTheme(t, save) {
   try { localStorage.setItem("uh-theme", t); } catch (e) {}
   $$("[data-theme-set]").forEach((b) => b.classList.toggle("on", b.dataset.themeSet === t));
   if (save) api("/api/settings", { theme: t }).catch(() => {});
+  syncBars();
+}
+// inside the Android app: colour the phone's status and navigation bars like the page
+function syncBars() {
+  if (!window.UniHubApp?.setBars) return;
+  requestAnimationFrame(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const dark = cs.colorScheme.trim() === "dark";
+    try { window.UniHubApp.setBars(dark ? "#0a0d19" : "#f5f3ee", dark); } catch (e) {}
+  });
 }
 $$("[data-theme-set]").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.themeSet, true)));
-mq.addEventListener?.("change", () => { /* auto mode follows the system through CSS */ });
+mq.addEventListener?.("change", syncBars);
 
 /* ================= state ================= */
 let S = null;
@@ -162,6 +172,7 @@ async function refresh() {
   bootId = S.bootId;
   offline = false;
   if (!themeSynced) { themeSynced = true; applyTheme(S.theme || "auto", false); }
+  document.documentElement.classList.toggle("on-app", S.platform === "android");
 
   $("#who").textContent = S.linked ? (S.fullName || S.siteName || "UniHub") : "غير مربوط بالمودل";
   $("#ver").textContent = "الإصدار " + S.version;
@@ -253,8 +264,12 @@ function renderBanners() {
   const u = S.update;
   if (u.installing) {
     b.push(`<div class="banner"><div class="b-ic">${ic("download")}</div><div class="b-txt"><b>جارٍ تثبيت التحديث ${esc(u.available?.version || "")}</b>
-      <span>${u.progress < 100 ? "تنزيل الملف…" : "التحقق والتثبيت… سيُعاد تشغيل البرنامج تلقائياً"}</span>
+      <span>${u.progress < 100 ? "تنزيل الملف…" : S.platform === "android" ? "التحقق من الملف…" : "التحقق والتثبيت… سيُعاد تشغيل البرنامج تلقائياً"}</span>
       <div class="progress"><i style="width:${u.progress || 2}%"></i></div></div></div>`);
+  } else if (u.available && u.ready === u.available.version) {
+    b.push(`<div class="banner"><div class="b-ic">${ic("sparkles")}</div><div class="b-txt"><b>التحديث ${esc(u.ready)} جاهز للتثبيت</b>
+      <span>تم تنزيله والتحقق منه. اضغط «تثبيت» ثم أكّد في نافذة أندرويد.</span></div>
+      <button class="btn sm ghost" id="bn-notes">ما الجديد؟</button><button class="btn sm gold" id="bn-upd">${ic("download")}تثبيت</button></div>`);
   } else if (u.available && u.error) {
     b.push(`<div class="banner warn"><div class="b-ic">${ic("alert")}</div><div class="b-txt"><b>لم يكتمل التحديث إلى ${esc(u.available.version)}</b>
       <span>${esc(u.error)}</span></div><button class="btn sm gold" id="bn-upd">${ic("refresh")}إعادة المحاولة</button></div>`);
@@ -288,7 +303,7 @@ function renderBanners() {
 
 async function startUpdate() {
   await api("/api/update/apply", {});
-  toast("بدأ تنزيل التحديث", "download");
+  toast(S.update.ready ? "افتح نافذة التثبيت وأكّد" : "بدأ تنزيل التحديث", "download");
   setTimeout(refresh, 500);
 }
 
@@ -456,7 +471,7 @@ views.search = (v, fresh) => {
   v.innerHTML = head("البحث", "يبحث في أسماء الملفات وداخل محتواها، بالعربي والإنجليزي") + `
     <div class="filters"><div class="seg">${types.map(([k, t, i]) => `<button class="${sFilter.type === k ? "on" : ""}" data-type="${k}">${ic(i)}${t}</button>`).join("")}</div>
       <select id="s-course" class="in"><option value="">كل المواد</option></select><span class="spacer"></span><span id="s-info" class="res-info"></span></div>
-    <div class="card"><div id="results" class="list">${empty("search", "اكتب في مربع البحث: اسم ملف، أو كلمة داخل المحاضرة<br><span class='small'>الأسهم للتنقل · Enter للفتح · Ctrl+Enter لإظهار المجلد</span>")}</div></div>`;
+    <div class="card"><div id="results" class="list">${empty("search", "اكتب في مربع البحث: اسم ملف، أو كلمة داخل المحاضرة<br><span class='small desk-only'>الأسهم للتنقل · Enter للفتح · Ctrl+Enter لإظهار المجلد</span>")}</div></div>`;
   $$("[data-type]", v).forEach((b) => b.addEventListener("click", () => {
     sFilter.type = b.dataset.type;
     $$("[data-type]", v).forEach((x) => x.classList.toggle("on", x === b));
@@ -550,8 +565,8 @@ views.setup = (v) => {
         <li>انسخ المفتاح بجانب <code>Moodle mobile web service</code> والصقه هنا.</li></ol>
     </div>
     <p><a id="toggle-tok" class="small">جامعتي تستخدم الدخول عبر Microsoft أو Google</a></p>
-    <label class="f">أين تُحفظ ملفات الجامعة المرتبة؟</label>
-    <div class="row"><input id="u-root" class="in grow" dir="ltr" value="${esc(S.rootDir)}">${S.isWindows ? `<button class="btn" id="pick-root">${ic("folder")}اختيار</button>` : ""}</div>
+    <div class="desk-only"><label class="f">أين تُحفظ ملفات الجامعة المرتبة؟</label>
+    <div class="row"><input id="u-root" class="in grow" dir="ltr" value="${esc(S.rootDir)}">${S.isWindows ? `<button class="btn" id="pick-root">${ic("folder")}اختيار</button>` : ""}</div></div>
     <div class="err" id="u-err" style="margin-top:12px"></div>
     <div class="row" style="margin-top:14px"><button class="btn primary" id="u-go">${ic("link")}ربط الحساب وبدء الترتيب</button>
       ${S.linked ? `<button class="btn ghost" data-go="home">إلغاء</button>` : ""}</div>
@@ -909,13 +924,13 @@ views.settings = (v) => {
         <button data-t="light" class="${theme === "light" ? "on" : ""}">${ic("sun")}فاتح</button>
         <button data-t="auto" class="${theme === "auto" ? "on" : ""}">${ic("monitor")}تلقائي</button>
         <button data-t="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon")}داكن</button></div>
-      <p class="hint">الوضع التلقائي يتبع إعدادات ويندوز ويتغير معها مباشرة.</p></div>
+      <p class="hint">الوضع التلقائي يتبع إعدادات الجهاز ويتغير معها مباشرة.</p></div>
 
     <div class="card">${cardHead("refresh", "المزامنة والتنبيهات")}
       <label class="f" style="margin-top:0">تحقق من المودل كل</label>
       <select id="s-min" class="in">${[10, 15, 20, 30, 60, 120].map((m) => `<option value="${m}" ${m === S.syncMinutes ? "selected" : ""}>${m} دقيقة</option>`).join("")}</select>
       <div style="margin-top:8px">
-      ${toggle("s-toast", "تنبيهات ويندوز", "ملفات جديدة، إشعارات، مواعيد قريبة، ملاحظات", S.toasts)}
+      ${toggle("s-toast", S.isWindows ? "تنبيهات ويندوز" : "التنبيهات", "ملفات جديدة، إشعارات، مواعيد قريبة، ملاحظات", S.toasts)}
       ${S.isWindows ? toggle("s-auto", "التشغيل مع ويندوز", "يعمل في الخلفية لتصلك التنبيهات دائماً", S.autostart) : ""}</div></div>
 
     <div class="card">${cardHead("sparkles", "التحديثات")}
@@ -925,19 +940,19 @@ views.settings = (v) => {
           : u.available ? `<span class="pill gold">${ic("sparkles")}يتوفر ${esc(u.available.version)}</span>`
           : u.error ? `<span class="pill red">${ic("alert")}${esc(u.error)}</span>`
           : u.lastCheck ? `<span class="pill green">${ic("check")}أحدث إصدار</span>` : `<span class="pill gray">لم يُفحص بعد</span>`}</dd></dl>
-      <div style="margin-top:8px">${toggle("s-autoupd", "التحديث التلقائي", "يثبّت التحديثات بهدوء ويحفظ بياناتك قبل كل تحديث", S.autoUpdate)}</div>
+      <div style="margin-top:8px">${toggle("s-autoupd", "التحديث التلقائي", S.platform === "android" ? "ينزّل التحديثات ويتحقق منها، ثم تثبّتها بضغطة واحدة" : "يثبّت التحديثات بهدوء ويحفظ بياناتك قبل كل تحديث", S.autoUpdate)}</div>
       <label class="f">مستودع GitHub للتحديثات والملاحظات</label>
       <input id="s-repo" class="in" dir="ltr" placeholder="username/unihub" value="${esc(S.repo || "")}">
       <div class="row wrap" style="margin-top:12px"><button class="btn" id="s-check">${ic("refresh")}البحث عن تحديث</button>
         ${u.available ? `<button class="btn gold" id="s-upd">${ic("download")}تحديث إلى ${esc(u.available.version)}</button>` : ""}
         <button class="btn ghost" id="s-backup">${ic("archive")}نسخة احتياطية الآن</button></div></div>
 
-    <div class="card">${cardHead("folder", "مجلد الجامعة المرتب")}
+    <div class="card desk-only">${cardHead("folder", "مجلد الجامعة المرتب")}
       <p class="hint" style="margin-top:0">هنا تنزل ملفات المودل: مجلد لكل مادة، وبداخله محاضرات / واجبات / امتحانات.</p>
       <div class="row"><input id="s-root" class="in grow" dir="ltr" value="${esc(S.rootDir)}">${S.isWindows ? `<button class="btn sq" id="s-pick" title="اختيار">${ic("folder")}</button>` : ""}</div>
       <div class="row" style="margin-top:10px"><button class="btn ghost" data-reveal="${esc(S.rootDir)}">${ic("external")}فتح المجلد</button></div></div>
 
-    <div class="card">${cardHead("search", "مجلدات إضافية للبحث")}
+    <div class="card desk-only">${cardHead("search", "مجلدات إضافية للبحث")}
       <p class="hint" style="margin-top:0">أضف مجلداتك القديمة ليشملها البحث. لن يتم تعديل أي شيء فيها.</p>
       <div id="extra" class="list"></div>
       <div class="row" style="margin-top:10px"><input id="s-add" class="in grow" dir="ltr" placeholder="مسار المجلد">${S.isWindows ? `<button class="btn sq" id="s-addpick" title="اختيار">${ic("folder")}</button>` : ""}<button class="btn" id="s-addbtn">${ic("plus")}إضافة</button></div></div>
@@ -1046,7 +1061,8 @@ views.import = (v) => {
 /* ================= responsive layout & sidebar ================= */
 const H = document.documentElement;
 const mqPhone = matchMedia("(max-width: 760px)"), mqTablet = matchMedia("(max-width: 1100px)");
-let sideCollapsed = H.classList.contains("side-collapsed"), sideOpen = false, layoutNow = "";
+let sideOpen = false, layoutNow = "";
+try { localStorage.removeItem("uh-side"); } catch (e) {}
 const layoutMode = () => (mqPhone.matches ? "phone" : mqTablet.matches ? "tablet" : "desktop");
 function applyLayout() {
   const m = layoutMode();
@@ -1058,20 +1074,15 @@ function applyLayout() {
   layoutNow = m;
   H.classList.remove("mode-phone", "mode-tablet", "mode-desktop");
   H.classList.add("mode-" + m);
-  H.classList.toggle("side-collapsed", sideCollapsed);
   H.classList.toggle("side-open", sideOpen);
-  H.classList.toggle("is-rail", m === "tablet" ? !sideOpen : m === "desktop" && sideCollapsed);
-  const b = $("#menu-btn");
-  b.setAttribute("aria-expanded", String(m === "desktop" ? !sideCollapsed : sideOpen));
-  b.title = m === "desktop" ? (sideCollapsed ? "توسيع القائمة (Ctrl+B)" : "طي القائمة (Ctrl+B)") : "القائمة";
+  H.classList.toggle("is-rail", m === "tablet" && !sideOpen);
+  $("#menu-btn").setAttribute("aria-expanded", String(sideOpen));
   $("#q").placeholder = m === "phone" ? "ابحث في ملفاتك…" : "ابحث في كل المحاضرات والواجبات والملفات…";
   document.body.style.overflow = sideOpen && m === "phone" ? "hidden" : "";
 }
 function toggleSide() {
-  if (layoutMode() === "desktop") {
-    sideCollapsed = !sideCollapsed;
-    try { localStorage.setItem("uh-side", sideCollapsed ? "1" : "0"); } catch (e) {}
-  } else sideOpen = !sideOpen;
+  if (layoutMode() === "desktop") return; // the full sidebar always shows on large screens
+  sideOpen = !sideOpen;
   applyLayout();
 }
 function closeSide() { if (sideOpen) { sideOpen = false; applyLayout(); } }
@@ -1081,8 +1092,7 @@ $("#scrim").addEventListener("click", closeSide);
 mqPhone.addEventListener("change", applyLayout);
 mqTablet.addEventListener("change", applyLayout);
 document.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSide(); }
-  else if (e.key === "Escape" && sideOpen) closeSide();
+  if (e.key === "Escape" && sideOpen) closeSide();
 });
 // links and buttons inside the sliding sidebar close it after use
 $("#side").addEventListener("click", (e) => { if (layoutMode() !== "desktop" && e.target.closest("nav a, [data-go]")) setTimeout(closeSide, 60); });
@@ -1122,6 +1132,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => H.classList.remove("no-a
 /* ================= quick access bar ================= */
 async function quitApp() {
   if (!confirm("إيقاف البرنامج؟ لن تصلك تنبيهات حتى تشغّله مرة أخرى.")) return;
+  if (S?.platform === "android") { try { await api("/api/quit", {}); } catch (e) {} return; }
   try { await api("/api/quit", {}); } catch (e) {}
   document.body.innerHTML = `<div class="setup" style="margin-top:12vh"><div class="card" style="text-align:center;padding:40px"><img src="icon.svg" style="width:64px"><h2 style="justify-content:center;margin-top:12px">تم إيقاف البرنامج</h2><p class="muted">يمكنك إغلاق هذه الصفحة. لتشغيله مرة أخرى افتح «منظّم الجامعة» من قائمة ابدأ.</p></div></div>`;
 }
@@ -1261,7 +1272,7 @@ function drawImages(v) {
     `<button class="btn" data-reveal="${esc(IMG.root)}">${ic("folder")}فتح المجلد</button>`) + `
   <div class="dropzone" id="dz">
     <div class="dz-ic">${ic("upload", "lg")}</div>
-    <div class="dz-txt"><b>أضف صورة</b><span>اسحبها وأفلتها هنا، أو اختر من جهازك، أو الصق لقطة شاشة بـ <kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
+    <div class="dz-txt"><b>أضف صورة</b><span><span class="desk-only">اسحبها وأفلتها هنا، أو اختر من جهازك، أو الصق لقطة شاشة بـ <kbd>Ctrl</kbd>+<kbd>V</kbd></span><span class="app-only">اختر صوراً من معرض الهاتف أو التقط صورة جديدة</span></span></div>
     <select class="in" id="up-cat" style="width:auto;min-width:170px">${cats.map((c) => `<option ${c.name === imgUploadCat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}<option value="__new">+ تصنيف جديد…</option></select>
     <button class="btn primary" id="up-btn">${ic("plus")}اختيار صور</button>
     <input type="file" id="up-file" accept="image/*" multiple hidden>

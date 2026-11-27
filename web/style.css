@@ -470,6 +470,7 @@ table.prev td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); overfl
   transition: color .15s, border-color .15s, background .15s; -webkit-tap-highlight-color: transparent;
 }
 .menu-btn:hover { color: var(--gold-ink); border-color: var(--gold-2); }
+.mode-desktop .menu-btn { display: none; }
 .menu-btn .icon { width: 20px; height: 20px; }
 .drawer-close {
   display: none; margin-inline-start: auto; width: 34px; height: 34px; border-radius: 10px; border: 0; flex-shrink: 0;
@@ -504,6 +505,11 @@ table.prev td { padding: 7px 8px; border-bottom: 1px solid var(--line-2); overfl
 .mode-phone .side { width: min(300px, 86vw); transform: translateX(105%); padding-top: env(safe-area-inset-top); }
 .mode-phone.side-open .side { transform: none; }
 .mode-phone .side nav a { padding-block: 11px; }
+
+/* inside the Android app: hide what only makes sense on a computer */
+.app-only { display: none; }
+.on-app .app-only { display: inline; }
+.on-app .desk-only, .on-app [data-reveal], .on-app [data-lb="reveal"], .on-app #nav [data-view="import"], .on-app kbd { display: none !important; }
 
 /* bottom tab bar (phone) */
 .tabbar { display: none; }
