@@ -36,6 +36,7 @@ jobs:
         id: v
         env:
           GH_TOKEN: ${{ github.token }}
+          HAS_KEY: ${{ secrets.ANDROID_KEYSTORE != '' && 'yes' || '' }}
         run: |
           if [ -n "${{ github.event.release.tag_name }}" ]; then
             TAG="${{ github.event.release.tag_name }}"
@@ -46,8 +47,10 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          # a release that already has the program attached needs nothing more
-          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx UniHub.exe; then
+          # a release that already has its files attached needs nothing more
+          # (the Android app is built only when the signing key secret exists)
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if echo "$ASSETS" | grep -qx UniHub.exe && { echo "$ASSETS" | grep -qx UniHub.apk || [ -z "$HAS_KEY" ]; }; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -66,8 +69,39 @@ jobs:
           go build -trimpath \
             -ldflags "-H windowsgui -s -w -X main.Version=${{ steps.v.outputs.version }} -X main.UpdateRepo=${{ github.repository }}" \
             -o dist/UniHub.exe .
+
+      - uses: actions/setup-java@v5
+        if: steps.v.outputs.skip != 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.v.outputs.skip != 'true'
+        with:
+          gradle-version: "8.14.3"
+
+      - name: البناء لأندرويد
+        if: steps.v.outputs.skip != 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          UNIHUB_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::لم يُبنَ تطبيق أندرويد: أضف ANDROID_KEYSTORE و ANDROID_KEYSTORE_PASSWORD في Settings > Secrets and variables > Actions"
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/unihub.jks"
+          export UNIHUB_KEYSTORE="$RUNNER_TEMP/unihub.jks"
+          tools/build-android.sh "${{ steps.v.outputs.version }}" release "${{ github.repository }}"
+          rm -f "$RUNNER_TEMP/unihub.jks"
+
+      - name: ملف التحقق والحزمة المضغوطة
+        if: steps.v.outputs.skip != 'true'
+        run: |
           cd dist
-          sha256sum UniHub.exe > checksums.txt
+          sha256sum UniHub.exe $( [ -f UniHub.apk ] && echo UniHub.apk ) > checksums.txt
+          cat checksums.txt
           cp ../docs/README-AR.txt . 2>/dev/null || true
           zip -9 UniHub-Windows.zip UniHub.exe README-AR.txt checksums.txt
 
@@ -86,4 +120,6 @@ jobs:
             [ -z "$NOTES" ] && NOTES="إصدار $TAG"
             gh release create "$TAG" --target "$GITHUB_SHA" --title "منظّم الجامعة $TAG" --notes "$NOTES"
           fi
-          gh release upload "$TAG" dist/UniHub.exe dist/checksums.txt dist/UniHub-Windows.zip --clobber
+          FILES="dist/UniHub.exe dist/checksums.txt dist/UniHub-Windows.zip"
+          [ -f dist/UniHub.apk ] && FILES="$FILES dist/UniHub.apk"
+          gh release upload "$TAG" $FILES --clobber

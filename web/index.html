@@ -10,12 +10,12 @@
 <script>
   window.API_TOKEN = "__API_TOKEN__";
   (function () {
-    var h = document.documentElement, c = false;
-    try { var t = localStorage.getItem("uh-theme"); if (t === "light" || t === "dark") h.dataset.theme = t; c = localStorage.getItem("uh-side") === "1"; } catch (e) {}
+    var h = document.documentElement;
+    try { var t = localStorage.getItem("uh-theme"); if (t === "light" || t === "dark") h.dataset.theme = t; } catch (e) {}
     var w = window.innerWidth, m = w <= 760 ? "phone" : w <= 1100 ? "tablet" : "desktop";
     h.classList.add("mode-" + m);
-    if (c) h.classList.add("side-collapsed");
-    if (m === "tablet" || (m === "desktop" && c)) h.classList.add("is-rail");
+    if (m === "tablet") h.classList.add("is-rail");
+    if (/UniHubApp\//.test(navigator.userAgent)) h.classList.add("on-app");
   })();
   document.documentElement.classList.add("no-anim");
 </script>
@@ -137,7 +137,7 @@
 
   <main>
     <header class="top">
-      <button class="menu-btn" id="menu-btn" title="القائمة (Ctrl+B)" aria-label="القائمة" aria-controls="side"><svg class="icon"><use href="#i-menu"/></svg></button>
+      <button class="menu-btn" id="menu-btn" title="القائمة" aria-label="القائمة" aria-controls="side"><svg class="icon"><use href="#i-menu"/></svg></button>
       <div class="searchbar">
         <svg class="icon"><use href="#i-search"/></svg>
         <input id="q" type="search" placeholder="ابحث في كل المحاضرات والواجبات والملفات…" autocomplete="off" spellcheck="false">
