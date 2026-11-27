@@ -5,3 +5,11 @@ dist/
 /unihub
 .DS_Store
 Thumbs.db
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/jniLibs/
+android/local.properties
+*.apk
+*.jks
+*.keystore

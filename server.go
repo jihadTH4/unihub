@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,6 +73,10 @@ func newServer(port int) http.Handler {
 		}
 		switch filepath.Ext(name) {
 		case ".html":
+			if !hostPageAllowed(w, r) {
+				http.Error(w, "forbidden", 403)
+				return
+			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			b = []byte(strings.Replace(string(b), "__API_TOKEN__", apiToken, 1))
 		case ".js":
@@ -127,6 +132,7 @@ func newServer(port int) http.Handler {
 			"index":         indexer.Status(),
 			"now":           time.Now().Unix(),
 			"isWindows":     isWindows,
+			"platform":      runtime.GOOS,
 			"version":       Version,
 			"bootId":        bootID,
 			"update":        getUpdateState(),
@@ -419,6 +425,7 @@ func newServer(port int) http.Handler {
 
 	mux.HandleFunc("/api/quit", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": true})
+		hostSend(hostCmd{Op: "quit"})
 		go func() {
 			time.Sleep(300 * time.Millisecond)
 			indexer.Save()
@@ -708,6 +715,14 @@ func newServer(port int) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hostOK[r.Host] {
 			http.Error(w, "forbidden", 403)
+			return
+		}
+		if r.URL.Path == "/api/host/poll" {
+			if !hasHost() || !keyEqual(r.Header.Get("X-UniHub-Host"), hostKey) {
+				http.Error(w, "forbidden", 403)
+				return
+			}
+			hostPoll(w, r)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/ping" {

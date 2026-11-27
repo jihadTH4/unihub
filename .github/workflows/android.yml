@@ -1,0 +1,38 @@
+name: فحص تطبيق أندرويد
+
+# يبني نسخة تجريبية من تطبيق أندرويد عند تعديل ملفاته، للتأكد أن كل شيء يُبنى بنجاح.
+# (النسخة الرسمية تُبنى وتُنشر مع كل إصدار في release.yml)
+on:
+  push:
+    paths:
+      - "android/**"
+      - "tools/build-android.sh"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+      - name: بناء التطبيق (نسخة تجريبية)
+        run: tools/build-android.sh "$(tr -d ' \r\n' < VERSION)" debug "${{ github.repository }}"
+      - name: فحص محتوى الحزمة
+        run: |
+          unzip -l dist/UniHub-debug.apk | grep -E "lib/|AndroidManifest|classes" 
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UniHub-debug-apk
+          path: dist/UniHub-debug.apk
+          retention-days: 7

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- notification icon: graduation cap over an open book (white silhouette) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,2.5L1.5,7.5L12,12.5L20.5,8.45V13.5H22V7.5Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M6,10.6V13.2C7.6,14.4 9.7,15 12,15C14.3,15 16.4,14.4 18,13.2V10.6L12,13.5Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M2.5,16.5C5.5,15.6 8.6,15.9 11.3,17.6V21.5C8.6,19.9 5.5,19.6 2.5,20.5ZM21.5,16.5C18.5,15.6 15.4,15.9 12.7,17.6V21.5C15.4,19.9 18.5,19.6 21.5,20.5Z" />
+</vector>

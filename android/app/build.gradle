@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The version comes from the VERSION file at the root of the repository (same as Windows).
+def appVersion = file('../../VERSION').text.trim()
+def parts = appVersion.tokenize('.').collect { it as int }
+def keystorePath = System.getenv('UNIHUB_KEYSTORE')
+
+android {
+    namespace 'io.github.jihadth4.unihub'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.jihadth4.unihub'
+        minSdk 26
+        targetSdk 34
+        versionCode parts[0] * 10000 + parts[1] * 100 + parts[2]
+        versionName appVersion
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('UNIHUB_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('UNIHUB_KEY_ALIAS') ?: 'unihub'
+                keyPassword System.getenv('UNIHUB_KEY_PASSWORD') ?: System.getenv('UNIHUB_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystorePath) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    // The engine (the same Go program as on Windows) ships as libunihub.so and is run as a
+    // process, so it must be extracted to disk and left as is.
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+            keepDebugSymbols += ['**/libunihub.so']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
