@@ -4,7 +4,8 @@ Desktop app (Windows) + Android app that syncs Moodle courses/assignments/notifi
 
 ## Architecture
 - Go 1.24, **standard library only** (no third-party modules). Single binary; UI embedded via `//go:embed web/*`, served on `127.0.0.1:47821` and opened in the browser.
-- `main.go` flags: `--background`, `--port`, `--wait-port`, `--updated-from=<old version>`.
+- `main.go` flags: `--background`, `--port`, `--wait-port`, `--updated-from=<old version>`, `--version` (prints the version; used to identify other copies).
+- `copies_windows.go` — 20 s after start, finds other `UniHub*.exe` copies (autostart target, install dir, shortcut targets on Desktop/Start/taskbar, loose copies in Desktop/Downloads), asks each `--version` (pre-1.5.2 copies answer with usage text) and replaces older ones with the running exe. Fixes "reopening brings back an old version" when the user has two copies.
 - `server.go` — local HTTP API (Host check + per-boot token header `X-UniHub-Token`).
 - `moodle.go` (REST client, mobile service token) · `sync.go` (download/organize, never deletes; changed files saved as "(نسخة محدثة …)") · `organize.go` (copy-only import of old folders).
 - `index.go` + `text.go` (inverted index, Arabic normalization) · `extract.go` + `pdf.go` (text extraction, custom PDF parser incl. encryption).

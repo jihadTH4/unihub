@@ -25,7 +25,12 @@ func main() {
 	port := flag.Int("port", appPort, "local port")
 	waitPort := flag.Bool("wait-port", false, "wait for the previous instance to release the port (after update/install)")
 	updatedFrom := flag.String("updated-from", "", "previous version, set by the updater")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(Version)
+		return
+	}
 
 	if err := initDataDir(); err != nil {
 		fmt.Println("cannot create data folder:", err)
@@ -99,6 +104,11 @@ func main() {
 	go scheduler()
 	go feedbackLoop()
 	go updateLoop()
+	go func() {
+		// bring other copies of UniHub.exe on this computer up to this version
+		time.Sleep(20 * time.Second)
+		syncCopies()
+	}()
 	go func() {
 		// the Android app stops the engine with SIGTERM: save everything before leaving
 		ch := make(chan os.Signal, 1)
