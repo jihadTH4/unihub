@@ -281,7 +281,7 @@ function renderBanners() {
   if (S.lastError && S.linked && !S.sync.running) {
     b.push(`<div class="banner warn"><div class="b-ic">${ic("alert")}</div><div class="b-txt"><b>تنبيه من المزامنة</b><span>${esc(S.lastError)}</span></div></div>`);
   }
-  if (S.canInstall && !S.installed && !sessionStorage.getItem("hide-install")) {
+  if (S.canInstall && !S.installed && !S.hideInstall) {
     b.push(`<div class="banner"><div class="b-ic">${ic("install")}</div><div class="b-txt"><b>ثبّت البرنامج على جهازك</b>
       <span>يضيف اختصاراً في قائمة ابدأ وسطح المكتب، ويجعل التحديثات التلقائية أسهل.</span></div>
       <button class="btn sm ghost" id="bn-later">لاحقاً</button><button class="btn sm primary" id="bn-install">تثبيت</button></div>`);
@@ -293,7 +293,11 @@ function renderBanners() {
     box.innerHTML = html;
     $("#bn-upd")?.addEventListener("click", startUpdate);
     $("#bn-notes")?.addEventListener("click", () => showNotes(S.update.available));
-    $("#bn-later")?.addEventListener("click", () => { sessionStorage.setItem("hide-install", "1"); renderBanners(); });
+    $("#bn-later")?.addEventListener("click", () => {
+      S.hideInstall = true; renderBanners();
+      api("/api/settings", { hideInstall: true }).catch(() => {});
+      toast("لن تظهر هذه الرسالة مرة أخرى. يمكنك التثبيت لاحقاً من الإعدادات", "install", 5000);
+    });
     $("#bn-install")?.addEventListener("click", async () => {
       try { await api("/api/install", {}); toast("تم التثبيت. يُعاد تشغيل البرنامج من مكانه الجديد…", "install", 6000); waitForServer(); }
       catch (e) { toast(e.message, "alert"); }
@@ -932,6 +936,10 @@ views.settings = (v) => {
       <div style="margin-top:8px">
       ${toggle("s-toast", S.isWindows ? "تنبيهات ويندوز" : "التنبيهات", "ملفات جديدة، إشعارات، مواعيد قريبة، ملاحظات", S.toasts)}
       ${S.isWindows ? toggle("s-auto", "التشغيل مع ويندوز", "يعمل في الخلفية لتصلك التنبيهات دائماً", S.autostart) : ""}</div></div>
+${S.canInstall && !S.installed ? `
+    <div class="card desk-only">${cardHead("install", "تثبيت البرنامج")}
+      <p class="hint" style="margin-top:0">البرنامج يعمل الآن من مكان مؤقت. التثبيت يضعه في مجلد البرامج ويضيف اختصاراً في قائمة ابدأ وسطح المكتب.</p>
+      <button class="btn primary" id="s-install">${ic("install")}تثبيت</button></div>` : ""}
 
     <div class="card">${cardHead("sparkles", "التحديثات")}
       <dl class="kv"><dt>الإصدار الحالي</dt><dd><b>${esc(S.version)}</b></dd>
@@ -975,6 +983,10 @@ views.settings = (v) => {
   };
   drawExtra();
   const addExtra = (p) => { p = p.trim(); if (p && !extra.includes(p)) extra.push(p); $("#s-add").value = ""; drawExtra(); };
+  $("#s-install")?.addEventListener("click", async () => {
+    try { await api("/api/install", {}); toast("تم التثبيت. يُعاد تشغيل البرنامج من مكانه الجديد…", "install", 6000); waitForServer(); }
+    catch (e) { toast(e.message, "alert"); }
+  });
   $$("#s-theme button").forEach((b) => b.addEventListener("click", () => { applyTheme(b.dataset.t, true); $$("#s-theme button").forEach((x) => x.classList.toggle("on", x === b)); }));
   $("#s-addbtn").addEventListener("click", () => addExtra($("#s-add").value));
   $("#s-addpick")?.addEventListener("click", async () => { const r = await api("/api/pickfolder", {}); if (r.path) addExtra(r.path); });

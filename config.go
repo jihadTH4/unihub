@@ -27,6 +27,7 @@ type Config struct {
 	Theme         string   `json:"theme"` // auto | light | dark
 	Links         []Link   `json:"links"` // the user's own university links (portal, pages, sites)
 	PinnedImages  []string `json:"pinnedImages"`
+	HideInstall   bool     `json:"hideInstall"` // the user chose «لاحقاً» on the install banner
 }
 
 // Link is a personal shortcut shown in the sidebar and on the home page.

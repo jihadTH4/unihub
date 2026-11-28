@@ -138,6 +138,7 @@ func newServer(port int) http.Handler {
 			"update":        getUpdateState(),
 			"installed":     isInstalled(),
 			"canInstall":    canInstall(),
+			"hideInstall":   c.HideInstall,
 			"theme":         c.Theme,
 			"autoUpdate":    c.AutoUpdate,
 			"repo":          currentRepo(),
@@ -208,6 +209,7 @@ func newServer(port int) http.Handler {
 			AutoUpdate  *bool    `json:"autoUpdate"`
 			Repo        *string  `json:"repo"`
 			Links       *[]Link  `json:"links"`
+			HideInstall *bool    `json:"hideInstall"`
 		}
 		if readBody(r, &req) != nil {
 			writeErr(w, 400, "طلب غير صالح")
@@ -278,6 +280,9 @@ func newServer(port int) http.Handler {
 			}
 			if req.Links != nil {
 				c.Links = links
+			}
+			if req.HideInstall != nil {
+				c.HideInstall = *req.HideInstall
 			}
 		})
 		if req.RootDir != nil || req.ExtraDirs != nil {
