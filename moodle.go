@@ -159,17 +159,19 @@ type ContentFile struct {
 }
 
 type Module struct {
-	ID       int           `json:"id"`
-	Name     string        `json:"name"`
-	ModName  string        `json:"modname"`
-	URL      string        `json:"url"`
-	Contents []ContentFile `json:"contents"`
+	ID          int           `json:"id"`
+	Name        string        `json:"name"`
+	ModName     string        `json:"modname"`
+	URL         string        `json:"url"`
+	Description string        `json:"description"` // HTML shown on the course page (label text, intros)
+	Contents    []ContentFile `json:"contents"`
 }
 
 type Section struct {
 	ID      int      `json:"id"`
 	Name    string   `json:"name"`
 	Section int      `json:"section"`
+	Summary string   `json:"summary"`
 	Modules []Module `json:"modules"`
 }
 
@@ -305,18 +307,30 @@ func (m *Moodle) UpcomingEvents() ([]CalEvent, error) {
 	return r.Events, err
 }
 
-// Download saves a Moodle file to dest (via a temp file so partial downloads never appear).
-func (m *Moodle) Download(fileURL, dest string) error {
+// authURL adds the token to a Moodle file URL (pluginfile.php needs its webservice variant).
+func (m *Moodle) authURL(fileURL string) string {
 	u := fileURL
 	if strings.Contains(u, "?") {
 		u += "&token=" + url.QueryEscape(m.Token)
 	} else {
 		u += "?token=" + url.QueryEscape(m.Token)
 	}
-	// pluginfile.php needs the webservice variant when using a token
 	if strings.Contains(u, "/pluginfile.php") && !strings.Contains(u, "/webservice/pluginfile.php") {
 		u = strings.Replace(u, "/pluginfile.php", "/webservice/pluginfile.php", 1)
 	}
+	return u
+}
+
+// sameSite reports whether u is on the Moodle site, so the token is never sent anywhere else.
+func (m *Moodle) sameSite(u string) bool {
+	a, err1 := url.Parse(u)
+	b, err2 := url.Parse(m.Base)
+	return err1 == nil && err2 == nil && a.Host != "" && strings.EqualFold(a.Host, b.Host)
+}
+
+// Download saves a Moodle file to dest (via a temp file so partial downloads never appear).
+func (m *Moodle) Download(fileURL, dest string) error {
+	u := m.authURL(fileURL)
 	c := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := c.Get(u)
 	if err != nil {

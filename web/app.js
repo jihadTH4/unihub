@@ -180,6 +180,7 @@ async function refresh() {
   setBadge("#badge-assign", pending);
   setBadge("#tb-assign", pending);
   setBadge("#badge-notif", S.newNotif);
+  setBadge("#badge-vid", S.videos === "manual" ? S.videosWaiting || 0 : 0);
   updateQuickbar();
   setBadge("#badge-fb", S.fbUnread);
   setBadge("#tb-more", S.fbUnread);
@@ -248,14 +249,46 @@ $("#btn-sync").addEventListener("click", async () => {
 });
 
 const views = {};
+let lastHTML = "";
 function render(fresh) {
   if (!S) return;
   const v = $("#view");
   const fn = views[current] || views.home;
-  if (fresh || !["search", "import", "settings", "setup", "course", "feedback", "links", "images"].includes(current)) {
+  if (fresh || !["search", "import", "settings", "setup", "course", "feedback", "links", "images", "videos"].includes(current)) {
     const html = fn(v, fresh);
-    if (typeof html === "string") v.innerHTML = html;
+    // the 5-second refresh rebuilds the page only when something changed (smoother on weak devices)
+    if (typeof html === "string" && (fresh || html !== lastHTML)) v.innerHTML = html;
+    lastHTML = typeof html === "string" ? html : "";
   }
+}
+
+/* ================= performance ================= */
+// "auto" watches the first seconds: if the device can't keep a smooth frame rate,
+// it switches to the light mode (fewer effects, shorter animations) and remembers it.
+function perfPref() { try { return localStorage.getItem("uh-perf") || "auto"; } catch (e) { return "auto"; } }
+function applyPerf(p) {
+  try { localStorage.setItem("uh-perf", p); } catch (e) {}
+  let detected = "";
+  try { detected = localStorage.getItem("uh-perf-detected") || ""; } catch (e) {}
+  const n = navigator, mem = n.deviceMemory || 8, cores = n.hardwareConcurrency || 8;
+  const weak = mem <= 2 || cores <= 2 || n.connection?.saveData || (/Android/.test(n.userAgent) && (mem <= 4 || cores <= 4)) || detected === "lite";
+  H.classList.toggle("perf-lite", p === "lite" || (p === "auto" && weak));
+}
+function measurePerf() {
+  if (perfPref() !== "auto" || H.classList.contains("perf-lite") || document.hidden) return;
+  let frames = 0, slow = 0, last = performance.now();
+  const start = last;
+  const step = (t) => {
+    frames++;
+    if (t - last > 34) slow++; // a frame that took longer than ~30 fps
+    last = t;
+    if (t - start < 2500) return requestAnimationFrame(step);
+    if (frames > 20 && slow / frames > 0.3) {
+      try { localStorage.setItem("uh-perf-detected", "lite"); } catch (e) {}
+      H.classList.add("perf-lite");
+    }
+  };
+  requestAnimationFrame(step);
 }
 
 /* ================= banners & modal ================= */
@@ -374,6 +407,15 @@ function notifRow(n) {
   </div>`;
 }
 
+// home summary cards: each one opens its own section
+const statLink = (view, icon, tone, n, label) =>
+  `<a class="stat link" data-go="${view}" role="button" tabindex="0" aria-label="${esc(label)}: ${esc(String(n))}"><div class="ic ${tone}">${ic(icon, "lg")}</div><div><b>${n}</b><span>${label}</span></div><span class="go">${ic("chevron")}</span></a>`;
+
+document.addEventListener("keydown", (e) => {
+  const el = e.target.closest?.(".stat.link");
+  if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); go(el.dataset.go); }
+});
+
 views.home = () => {
   const up = upcoming();
   const pending = (S.assignments || []).filter((a) => a.status !== "submitted" && a.due > S.now).length;
@@ -382,10 +424,10 @@ views.home = () => {
   const first = (S.fullName || "").split(" ")[0];
   return head(`${greet}${first ? "، " + esc(first) : ""}`, "هذه نظرة سريعة على دراستك اليوم", "", dateOnly(S.now)) + `
   <div class="stats">
-    <div class="stat"><div class="ic">${ic("book", "lg")}</div><div><b>${(S.courses || []).length}</b><span>مادة دراسية</span></div></div>
-    <div class="stat"><div class="ic red">${ic("tasks", "lg")}</div><div><b>${pending}</b><span>واجب بانتظار التسليم</span></div></div>
-    <div class="stat"><div class="ic blue">${ic("search", "lg")}</div><div><b>${S.index.docs.toLocaleString("en")}</b><span>ملف قابل للبحث</span></div></div>
-    <div class="stat"><div class="ic green">${ic("bell", "lg")}</div><div><b>${S.newNotif || 0}</b><span>إشعار جديد</span></div></div>
+    ${statLink("courses", "book", "", (S.courses || []).length, "مادة دراسية")}
+    ${statLink("assignments", "tasks", "red", pending, "واجب بانتظار التسليم")}
+    ${statLink("search", "search", "blue", S.index.docs.toLocaleString("en"), "ملف قابل للبحث")}
+    ${statLink("notifications", "bell", "green", S.newNotif || 0, "إشعار جديد")}
   </div>
   ${pinnedCard()}
   ${(S.links || []).length ? `<div class="card" style="margin-bottom:20px">${cardHead("link", "روابطي", `<a data-go="links" class="small">تعديل</a>`)}
@@ -420,7 +462,7 @@ views.course = (v) => {
   v.innerHTML = empty("refresh", "جارٍ التحميل…");
   api("/api/course?id=" + params.id).then((d) => {
     const c = d.course;
-    const cats = ["الكل", "محاضرات", "واجبات", "امتحانات", "ملفات أخرى"];
+    const cats = ["الكل", "محاضرات", "فيديوهات المحاضرات", "واجبات", "امتحانات", "ملفات أخرى"].filter((t, i) => i !== 2 || d.files.some((f) => f.category === t));
     const tab = params.tab || "الكل";
     const catOf = (f) => f.category || "ملفات أخرى";
     const count = (t) => (t === "الكل" ? d.files.length : d.files.filter((f) => catOf(f) === t).length);
@@ -437,6 +479,99 @@ views.course = (v) => {
       <div class="card"><div class="list">${files.map((f) => fileRow(f)).join("") || empty("folder", "لا توجد ملفات هنا")}</div></div>`;
     $$("[data-tab]", v).forEach((b) => b.addEventListener("click", () => { params.tab = b.dataset.tab; views.course(v); }));
   }).catch((e) => (v.innerHTML = empty("alert", esc(e.message))));
+};
+
+/* ================= lecture videos ================= */
+let VID = null, vidTimer = null, vidFilter = "all";
+const vidModes = { auto: "تلقائي", manual: "يدوي", off: "إيقاف" };
+const vidStatus = {
+  new: ["gray", "download", "لم يُنزّل"], queued: ["blue", "clock", "في الانتظار"], downloading: ["gold", "download", "جارٍ التنزيل"],
+  done: ["green", "check", "على جهازك"], error: ["red", "alert", "تعذّر"], hidden: ["gray", "eye-off", "متجاهل"], missing: ["amber", "alert", "نُقل أو حُذف"],
+};
+function speedTxt(b) { return b > 0 ? size(b) + "/ث" : ""; }
+function etaTxt(p) {
+  if (!(p.speed > 0) || !(p.total > p.done)) return "";
+  const s = Math.round((p.total - p.done) / p.speed);
+  return s < 60 ? "أقل من دقيقة" : s < 3600 ? `${Math.ceil(s / 60)} دقيقة متبقية` : `${(s / 3600).toFixed(1)} ساعة متبقية`;
+}
+async function loadVideos() { VID = await api("/api/videos"); return VID; }
+
+views.videos = (v) => {
+  clearInterval(vidTimer);
+  if (!VID) v.innerHTML = empty("refresh", "جارٍ التحميل…");
+  const draw = () => {
+    const items = VID.items || [], p = VID.progress || {};
+    const waiting = items.filter((i) => i.status === "new" || i.status === "error").length;
+    const done = items.filter((i) => i.status === "done");
+    const total = done.reduce((s, i) => s + (i.size || 0), 0);
+    const shown = items.filter((i) => vidFilter === "all" ? i.status !== "hidden" : vidFilter === "todo" ? !["done", "hidden"].includes(i.status) : vidFilter === "done" ? i.status === "done" : i.status === "hidden");
+    const groups = {};
+    for (const it of shown) (groups[it.course] = groups[it.course] || []).push(it);
+    const row = (it) => {
+      const p = VID.progress || {}; // read fresh: the active row is redrawn every second
+      const [cls, icn, txt] = vidStatus[it.status] || vidStatus.new;
+      const live = p.running && p.key === it.key;
+      const pct = live && p.total ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
+      const ext = "." + (it.name.split(".").pop() || "mp4");
+      return `<div class="item vid-row ${it.status === "done" ? "clickable" : ""}" data-key="${esc(it.key)}" ${it.status === "done" ? `data-open="${esc(it.localPath)}"` : ""}>
+        <div class="vid-ic ${it.status === "done" ? "ok" : ""}">${ic(it.status === "done" ? "play" : /\.(mp3|m4a|aac|wav|ogg|oga|opus)$/i.test(ext) ? "bell" : "video")}</div>
+        <div class="body"><div class="title" dir="auto">${esc(it.name)}</div>
+          <div class="meta"><span class="pill ${cls}">${ic(icn)}${live ? pct + "%" : txt}</span>${it.section ? esc(it.section) + SEP : ""}${it.size ? `<span dir="ltr">${esc(size(it.size))}</span>` : ""}${it.updated ? SEP + "نسخة محدثة" : ""}</div>
+          ${live ? `<div class="progress"><i style="width:${pct}%"></i></div><div class="meta" style="margin-top:4px">${p.done ? `<span dir="ltr">${esc(size(p.done))}</span>${p.total ? ` من <span dir="ltr">${esc(size(p.total))}</span>` : ""}` : "جارٍ البدء…"}${p.speed ? SEP + `<span dir="ltr">${esc(speedTxt(p.speed))}</span>` : ""}${etaTxt(p) ? SEP + etaTxt(p) : ""}</div>` : ""}
+          ${it.status === "error" && it.error ? `<div class="snip">${esc(it.error)}</div>` : ""}</div>
+        <div class="actions">
+          ${it.status === "done" ? `<button class="btn sm ghost" data-reveal="${esc(it.localPath)}" title="إظهار في المجلد">${ic("folder")}</button>` : ""}
+          ${["new", "error", "missing"].includes(it.status) ? `<button class="btn sm" data-vget="${esc(it.key)}">${ic("download")}تنزيل</button>` : ""}
+          ${it.status === "new" || it.status === "error" ? `<button class="btn sm ghost" data-vhide="${esc(it.key)}" title="تجاهل هذا الفيديو">${ic("eye-off")}</button>` : ""}
+          ${it.status === "hidden" ? `<button class="btn sm ghost" data-vshow="${esc(it.key)}">إظهار</button>` : ""}
+        </div></div>`;
+    };
+    drawRow = row;
+    const mode = VID.mode;
+    v.innerHTML = head("الفيديوهات", "فيديوهات المحاضرات والتسجيلات الصوتية من المودل، تُحفظ في مجلد «فيديوهات المحاضرات» داخل كل مادة",
+      p.running || items.some((i) => i.status === "queued")
+        ? `<button class="btn" id="v-stop">${ic("stop")}إيقاف التنزيل</button>`
+        : waiting ? `<button class="btn primary" id="v-all">${ic("download")}تنزيل الكل (${waiting})</button>` : "") + `
+    <div class="stats vid-stats">
+      <div class="stat"><div class="ic">${ic("video", "lg")}</div><div><b>${items.filter((i) => i.status !== "hidden").length}</b><span>فيديو في موادك</span></div></div>
+      <div class="stat"><div class="ic green">${ic("check", "lg")}</div><div><b>${done.length}</b><span>على جهازك${total ? ` · <span dir="ltr">${esc(size(total))}</span>` : ""}</span></div></div>
+      <div class="stat"><div class="ic blue">${ic("download", "lg")}</div><div><b>${waiting}</b><span>لم يُنزّل بعد</span></div></div>
+    </div>
+    <div class="card vid-mode">
+      <div><b>طريقة الجلب</b><p class="hint" style="margin:2px 0 0">${mode === "auto" ? "كل فيديو جديد ينزل تلقائياً بعد المحاضرات والملفات" : mode === "manual" ? "يظهر الفيديو الجديد هنا، وتنزّله أنت عند الحاجة" : "لا يبحث البرنامج عن الفيديوهات"}</p></div>
+      <div class="seg" id="v-mode">${Object.entries(vidModes).map(([k, t]) => `<button data-m="${k}" class="${mode === k ? "on" : ""}">${t}</button>`).join("")}</div>
+    </div>
+    <div class="row wrap" style="margin:18px 0 14px"><div class="seg" id="v-filter">${[["all", "الكل"], ["todo", "غير منزّلة"], ["done", "على جهازي"], ["hidden", "متجاهلة"]].map(([k, t]) => `<button data-f="${k}" class="${vidFilter === k ? "on" : ""}">${t}</button>`).join("")}</div></div>
+    ${Object.entries(groups).map(([course, list]) => `<div class="card" style="margin-bottom:16px">${cardHead("book", esc(course), `<span class="pill gray">${list.length}</span>`)}<div class="list">${list.map(row).join("")}</div></div>`).join("")
+      || `<div class="card">${empty("video", mode === "off" ? "جلب الفيديوهات متوقف. اختر «تلقائي» أو «يدوي»" : items.length ? "لا شيء هنا" : "لم يُعثر على فيديوهات بعد. ستظهر هنا بعد المزامنة القادمة")}</div>`}`;
+    $("#v-all")?.addEventListener("click", async () => { await api("/api/videos/get", {}); toast("بدأ تنزيل الفيديوهات", "download"); tick(); });
+    $("#v-stop")?.addEventListener("click", async () => { await api("/api/videos/stop", {}); toast("أُوقف التنزيل. سيُستكمل من حيث توقف عند البدء من جديد", "stop", 5000); tick(); });
+    $$("#v-mode button").forEach((b) => b.addEventListener("click", async () => {
+      await api("/api/settings", { videos: b.dataset.m });
+      if (b.dataset.m !== "off") api("/api/sync", {}).catch(() => {});
+      await refresh(); tick();
+    }));
+    $$("#v-filter button").forEach((b) => b.addEventListener("click", () => { vidFilter = b.dataset.f; draw(); }));
+    $$("[data-vget]", v).forEach((b) => b.addEventListener("click", async (e) => { e.stopPropagation(); await api("/api/videos/get", { keys: [b.dataset.vget] }); tick(); }));
+    $$("[data-vhide]", v).forEach((b) => b.addEventListener("click", async (e) => { e.stopPropagation(); await api("/api/videos/hide", { keys: [b.dataset.vhide], hide: true }); tick(); }));
+    $$("[data-vshow]", v).forEach((b) => b.addEventListener("click", async (e) => { e.stopPropagation(); await api("/api/videos/hide", { keys: [b.dataset.vshow], hide: false }); tick(); }));
+  };
+  // a full redraw only when the list changes; while downloading, just the active row
+  let sig = "", drawRow = null;
+  const sigOf = () => JSON.stringify([VID.mode, VID.items, !!VID.progress?.running]);
+  const tick = async () => {
+    if (current !== "videos") { clearInterval(vidTimer); return; }
+    try { await loadVideos(); } catch (e) { return; }
+    const s = sigOf();
+    if (s !== sig) { sig = s; draw(); return; }
+    const p = VID.progress || {};
+    const el = p.running && [...$$(".vid-row", v)].find((r) => r.dataset.key === p.key);
+    const it = el && VID.items.find((i) => i.key === p.key);
+    if (it && drawRow) el.outerHTML = drawRow(it);
+  };
+  if (VID) { sig = sigOf(); draw(); }
+  tick();
+  vidTimer = setInterval(tick, 1000);
 };
 
 /* ================= assignments & notifications ================= */
@@ -916,81 +1051,148 @@ views.settings = (v) => {
   const hidden = new Set(S.hidden || []);
   const u = S.update;
   const theme = localStorage.getItem("uh-theme") || S.theme || "auto";
-  v.innerHTML = head("الإعدادات", "", `<button class="btn primary" id="s-save">${ic("check")}حفظ الإعدادات</button>`) + `
-  <div class="grid g2" style="align-items:start">
-    <div class="card">${cardHead("cap", "حساب المودل")}
-      ${S.linked ? `<dl class="kv"><dt>الاسم</dt><dd>${esc(S.fullName)}</dd><dt>الموقع</dt><dd dir="ltr" style="text-align:right">${esc(S.moodleUrl)}</dd></dl>` : `<p class="muted">غير مربوط</p>`}
-      <div class="row" style="margin-top:14px"><button class="btn" id="relink">${ic("link")}${S.linked ? "تغيير الحساب" : "ربط الحساب"}</button>
-      ${S.linked ? `<button class="btn danger" id="logout">فصل الحساب</button>` : ""}</div></div>
+  const perf = perfPref();
+  const lite = H.classList.contains("perf-lite");
+  const initials = (S.fullName || "؟").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join(" ");
+  const seg = (id, cur, opts) => `<div class="seg full" id="${id}">${opts.map(([k, t, i]) => `<button data-k="${k}" class="${cur === k ? "on" : ""}">${i ? ic(i) : ""}${t}</button>`).join("")}</div>`;
+  const updState = u.installing ? `<span class="pill blue">${ic("download")}جارٍ التحديث ${u.progress || 0}%</span>`
+    : u.available ? `<span class="pill gold">${ic("sparkles")}يتوفر ${esc(u.available.version)}</span>`
+    : u.error ? `<span class="pill red" title="${esc(u.error)}">${ic("alert")}تعذّر التحديث</span>`
+    : u.lastCheck ? `<span class="pill green">${ic("check")}أحدث إصدار</span>` : `<span class="pill gray">لم يُفحص بعد</span>`;
+  const shownCourses = (S.courses || []).length - (S.courses || []).filter((c) => hidden.has(c.id)).length;
 
-    <div class="card">${cardHead("sun", "المظهر")}
-      <div class="seg" id="s-theme">
-        <button data-t="light" class="${theme === "light" ? "on" : ""}">${ic("sun")}فاتح</button>
-        <button data-t="auto" class="${theme === "auto" ? "on" : ""}">${ic("monitor")}تلقائي</button>
-        <button data-t="dark" class="${theme === "dark" ? "on" : ""}">${ic("moon")}داكن</button></div>
-      <p class="hint">الوضع التلقائي يتبع إعدادات الجهاز ويتغير معها مباشرة.</p></div>
+  v.innerHTML = head("الإعدادات", "كل تغيير يُحفظ مباشرة") + `
+  <div class="bento">
+    <section class="tile t-account span-7">
+      <div class="acc">
+        <div class="avatar">${esc(initials)}</div>
+        <div class="grow"><div class="eyebrow">${S.linked ? "حساب المودل" : "غير مربوط"}</div>
+          <h3>${S.linked ? esc(S.fullName) : "اربط حسابك لتبدأ المزامنة"}</h3>
+          ${S.linked ? `<div class="site" dir="ltr">${esc(S.moodleUrl.replace(/^https?:\/\//, ""))}</div>` : ""}</div>
+      </div>
+      <div class="acc-stats">
+        <div><b>${(S.courses || []).length}</b><span>مادة</span></div>
+        <div><b>${S.index.docs.toLocaleString("en")}</b><span>ملف مفهرس</span></div>
+        <div><b>${S.lastSync ? ago(S.lastSync) : "—"}</b><span>آخر مزامنة</span></div>
+      </div>
+      <div class="row wrap"><button class="btn light" id="relink">${ic("link")}${S.linked ? "تغيير الحساب" : "ربط الحساب"}</button>
+        ${S.linked ? `<button class="btn on-dark-ghost" id="logout">فصل الحساب</button>` : ""}</div>
+    </section>
 
-    <div class="card">${cardHead("refresh", "المزامنة والتنبيهات")}
-      <label class="f" style="margin-top:0">تحقق من المودل كل</label>
-      <select id="s-min" class="in">${[10, 15, 20, 30, 60, 120].map((m) => `<option value="${m}" ${m === S.syncMinutes ? "selected" : ""}>${m} دقيقة</option>`).join("")}</select>
+    <section class="tile span-5">
+      ${cardHead("sparkles", "التحديثات", updState)}
+      <div class="ver"><span>الإصدار</span><b dir="ltr">${esc(S.version)}</b><small>${u.lastCheck ? "آخر فحص " + ago(u.lastCheck) : ""}</small></div>
+      ${toggle("s-autoupd", "التحديث التلقائي", S.platform === "android" ? "ينزّل التحديث ويتحقق منه، ثم تثبّته بضغطة" : "يثبّت التحديثات بهدوء ويحفظ بياناتك قبلها", S.autoUpdate)}
+      <div class="row wrap" style="margin-top:12px"><button class="btn" id="s-check">${ic("refresh")}البحث عن تحديث</button>
+        ${u.available ? `<button class="btn gold" id="s-upd">${ic("download")}تحديث إلى ${esc(u.available.version)}</button>` : ""}</div>
+    </section>
+
+    <section class="tile span-4">
+      ${cardHead("sun", "المظهر")}
+      ${seg("s-theme", theme, [["light", "فاتح", "sun"], ["auto", "تلقائي", "monitor"], ["dark", "داكن", "moon"]])}
+      <p class="hint">الوضع التلقائي يتبع إعدادات الجهاز.</p>
+    </section>
+
+    <section class="tile span-4">
+      ${cardHead("gauge", "الأداء والحركة", lite ? `<span class="pill gold">الوضع الخفيف يعمل</span>` : "")}
+      ${seg("s-perf", perf, [["auto", "تلقائي"], ["full", "كامل"], ["lite", "خفيف"]])}
+      <p class="hint">${perf === "auto" ? "يكتشف البرنامج الأجهزة الضعيفة ويخفف المؤثرات وحده." : perf === "lite" ? "مؤثرات أقل وحركة أسرع، مناسب للأجهزة والهواتف الضعيفة." : "كل المؤثرات والحركات، للأجهزة القوية."}</p>
+    </section>
+
+    <section class="tile span-4">
+      ${cardHead("video", "فيديوهات المحاضرات")}
+      ${seg("s-videos", S.videos, [["auto", "تلقائي"], ["manual", "يدوي"], ["off", "إيقاف"]])}
+      <p class="hint">${S.videos === "auto" ? "تنزل الفيديوهات الجديدة وحدها بعد الملفات." : S.videos === "manual" ? "تظهر في صفحة الفيديوهات وتنزّلها متى شئت." : "لا يبحث البرنامج عن الفيديوهات."}
+        <a data-go="videos">صفحة الفيديوهات</a></p>
+    </section>
+
+    <section class="tile span-6">
+      ${cardHead("refresh", "المزامنة والتنبيهات")}
+      <div class="row"><label class="f grow" style="margin:0">تحقق من المودل كل</label>
+        <select id="s-min" class="in" style="width:auto">${[10, 15, 20, 30, 60, 120].map((m) => `<option value="${m}" ${m === S.syncMinutes ? "selected" : ""}>${m} دقيقة</option>`).join("")}</select></div>
       <div style="margin-top:8px">
       ${toggle("s-toast", S.isWindows ? "تنبيهات ويندوز" : "التنبيهات", "ملفات جديدة، إشعارات، مواعيد قريبة، ملاحظات", S.toasts)}
-      ${S.isWindows ? toggle("s-auto", "التشغيل مع ويندوز", "يعمل في الخلفية لتصلك التنبيهات دائماً", S.autostart) : ""}</div></div>
-${S.canInstall && !S.installed ? `
-    <div class="card desk-only">${cardHead("install", "تثبيت البرنامج")}
-      <p class="hint" style="margin-top:0">البرنامج يعمل الآن من مكان مؤقت. التثبيت يضعه في مجلد البرامج ويضيف اختصاراً في قائمة ابدأ وسطح المكتب.</p>
-      <button class="btn primary" id="s-install">${ic("install")}تثبيت</button></div>` : ""}
+      ${S.isWindows ? toggle("s-auto", "التشغيل مع ويندوز", "يعمل في الخلفية لتصلك التنبيهات دائماً", S.autostart) : ""}</div>
+    </section>
 
-    <div class="card">${cardHead("sparkles", "التحديثات")}
-      <dl class="kv"><dt>الإصدار الحالي</dt><dd><b>${esc(S.version)}</b></dd>
-        <dt>آخر فحص</dt><dd>${u.lastCheck ? ago(u.lastCheck) : "—"}</dd>
-        <dt>الحالة</dt><dd>${u.installing ? `<span class="pill blue">${ic("download")}جارٍ التحديث ${u.progress || 0}%</span>`
-          : u.available ? `<span class="pill gold">${ic("sparkles")}يتوفر ${esc(u.available.version)}</span>`
-          : u.error ? `<span class="pill red">${ic("alert")}${esc(u.error)}</span>`
-          : u.lastCheck ? `<span class="pill green">${ic("check")}أحدث إصدار</span>` : `<span class="pill gray">لم يُفحص بعد</span>`}</dd></dl>
-      <div style="margin-top:8px">${toggle("s-autoupd", "التحديث التلقائي", S.platform === "android" ? "ينزّل التحديثات ويتحقق منها، ثم تثبّتها بضغطة واحدة" : "يثبّت التحديثات بهدوء ويحفظ بياناتك قبل كل تحديث", S.autoUpdate)}</div>
-      <label class="f">مستودع GitHub للتحديثات والملاحظات</label>
-      <input id="s-repo" class="in" dir="ltr" placeholder="username/unihub" value="${esc(S.repo || "")}">
-      <div class="row wrap" style="margin-top:12px"><button class="btn" id="s-check">${ic("refresh")}البحث عن تحديث</button>
-        ${u.available ? `<button class="btn gold" id="s-upd">${ic("download")}تحديث إلى ${esc(u.available.version)}</button>` : ""}
-        <button class="btn ghost" id="s-backup">${ic("archive")}نسخة احتياطية الآن</button></div></div>
-
-    <div class="card desk-only">${cardHead("folder", "مجلد الجامعة المرتب")}
-      <p class="hint" style="margin-top:0">هنا تنزل ملفات المودل: مجلد لكل مادة، وبداخله محاضرات / واجبات / امتحانات.</p>
-      <div class="row"><input id="s-root" class="in grow" dir="ltr" value="${esc(S.rootDir)}">${S.isWindows ? `<button class="btn sq" id="s-pick" title="اختيار">${ic("folder")}</button>` : ""}</div>
-      <div class="row" style="margin-top:10px"><button class="btn ghost" data-reveal="${esc(S.rootDir)}">${ic("external")}فتح المجلد</button></div></div>
-
-    <div class="card desk-only">${cardHead("search", "مجلدات إضافية للبحث")}
-      <p class="hint" style="margin-top:0">أضف مجلداتك القديمة ليشملها البحث. لن يتم تعديل أي شيء فيها.</p>
-      <div id="extra" class="list"></div>
-      <div class="row" style="margin-top:10px"><input id="s-add" class="in grow" dir="ltr" placeholder="مسار المجلد">${S.isWindows ? `<button class="btn sq" id="s-addpick" title="اختيار">${ic("folder")}</button>` : ""}<button class="btn" id="s-addbtn">${ic("plus")}إضافة</button></div></div>
-
-    <div class="card">${cardHead("book", "المواد المعروضة")}
+    <section class="tile span-6">
+      ${cardHead("book", "المواد المعروضة", `<span class="pill gray">${shownCourses} من ${(S.courses || []).length}</span>`)}
       <p class="hint" style="margin-top:0">أوقف المواد القديمة التي لا تريد تنزيل ملفاتها.</p>
-      ${(S.courses || []).map((c) => `<label class="toggle"><span class="t"><b>${esc(c.name)}</b></span><span class="switch"><input type="checkbox" class="s-course" value="${c.id}" ${hidden.has(c.id) ? "" : "checked"}><i></i></span></label>`).join("") || '<div class="muted">لا توجد مواد بعد</div>'}</div>
+      <div class="course-toggles">${(S.courses || []).map((c) => `<label class="toggle"><span class="t"><b>${esc(c.name)}</b></span><span class="switch"><input type="checkbox" class="s-course" value="${c.id}" ${hidden.has(c.id) ? "" : "checked"}><i></i></span></label>`).join("") || '<div class="muted">لا توجد مواد بعد</div>'}</div>
+    </section>
 
-    <div class="card">${cardHead("power", "البرنامج")}
-      <dl class="kv"><dt>ملفات مفهرسة</dt><dd>${S.index.docs.toLocaleString("en")}</dd><dt>مثبّت</dt><dd>${S.installed ? "نعم" : "لا"}</dd></dl>
-      <div class="row wrap" style="margin-top:14px"><button class="btn" id="s-rescan">${ic("refresh")}إعادة فحص الملفات</button>
-      <button class="btn danger" id="s-quit">${ic("power")}إيقاف البرنامج</button></div></div>
+    <section class="tile span-6 desk-only">
+      ${cardHead("folder", "مجلد الجامعة المرتب")}
+      <p class="hint" style="margin-top:0">هنا تنزل ملفات المودل: مجلد لكل مادة، وبداخله محاضرات وفيديوهات وواجبات وامتحانات.</p>
+      <div class="row"><input id="s-root" class="in grow" dir="ltr" value="${esc(S.rootDir)}">${S.isWindows ? `<button class="btn sq" id="s-pick" title="اختيار">${ic("folder")}</button>` : ""}</div>
+      <div class="row" style="margin-top:10px"><button class="btn ghost" data-reveal="${esc(S.rootDir)}">${ic("external")}فتح المجلد</button></div>
+    </section>
+
+    <section class="tile span-6 desk-only">
+      ${cardHead("search", "مجلدات إضافية للبحث")}
+      <p class="hint" style="margin-top:0">أضف مجلداتك القديمة ليشملها البحث. لن يُعدَّل أي شيء فيها.</p>
+      <div id="extra" class="list"></div>
+      <div class="row" style="margin-top:10px"><input id="s-add" class="in grow" dir="ltr" placeholder="مسار المجلد">${S.isWindows ? `<button class="btn sq" id="s-addpick" title="اختيار">${ic("folder")}</button>` : ""}<button class="btn" id="s-addbtn">${ic("plus")}إضافة</button></div>
+    </section>
+
+    <section class="tile span-8">
+      ${cardHead("github", "الملاحظات الفنية والتحديثات من GitHub")}
+      <label class="f" style="margin-top:0">المستودع</label>
+      <div class="row"><input id="s-repo" class="in grow" dir="ltr" placeholder="username/unihub" value="${esc(S.repo || "")}"><button class="btn" id="s-repo-save">${ic("check")}حفظ</button></div>
+      <p class="hint">${S.repoBuiltIn ? "المستودع الأصلي مضمّن في البرنامج، ولا حاجة لتغييره عادةً." : "المستودع الذي تصل منه التحديثات وتُرسل إليه الملاحظات."}</p>
+    </section>
+
+    <section class="tile span-4">
+      ${cardHead("power", "البرنامج")}
+      <dl class="kv"><dt>مثبّت</dt><dd>${S.installed ? "نعم" : "لا"}</dd><dt>الجهاز</dt><dd>${S.platform === "android" ? "أندرويد" : S.isWindows ? "ويندوز" : esc(S.platform || "")}</dd></dl>
+      <div class="stack">
+        ${S.canInstall && !S.installed ? `<button class="btn primary desk-only" id="s-install">${ic("install")}تثبيت البرنامج</button>` : ""}
+        <button class="btn" id="s-rescan">${ic("refresh")}إعادة فحص الملفات</button>
+        <button class="btn ghost" id="s-backup">${ic("archive")}نسخة احتياطية الآن</button>
+        <button class="btn danger" id="s-quit">${ic("power")}إيقاف البرنامج</button></div>
+    </section>
   </div>
   <div class="err" id="s-err" style="margin-top:14px"></div>`;
 
+  // every change is saved right away
+  const save = async (patch, msg = "تم الحفظ") => {
+    $("#s-err").textContent = "";
+    try { await api("/api/settings", patch); toast(msg, "check", 1600); await refresh(); }
+    catch (e) { $("#s-err").textContent = e.message; toast(e.message, "alert"); }
+  };
+  const segPick = (id, fn) => $$(`#${id} button`).forEach((b) => b.addEventListener("click", () => {
+    $$(`#${id} button`).forEach((x) => x.classList.toggle("on", x === b)); fn(b.dataset.k);
+  }));
   const drawExtra = () => {
     $("#extra").innerHTML = extra.map((d, i) => `<div class="item"><div class="kind-ic" style="background:var(--surface-2)">${ic("folder")}</div><div class="body small" dir="ltr" style="text-align:right">${esc(d)}</div>
-      <div class="actions"><button class="btn sm ghost danger" data-rm="${i}">${ic("x")}</button></div></div>`).join("") || '<div class="muted small">لا توجد مجلدات إضافية</div>';
-    $$("[data-rm]").forEach((b) => b.addEventListener("click", () => { extra.splice(+b.dataset.rm, 1); drawExtra(); }));
+      <div class="actions"><button class="btn sm ghost danger" data-rm="${i}" title="إزالة من البحث">${ic("x")}</button></div></div>`).join("") || '<div class="muted small">لا توجد مجلدات إضافية</div>';
+    $$("[data-rm]").forEach((b) => b.addEventListener("click", () => { extra.splice(+b.dataset.rm, 1); drawExtra(); save({ extraDirs: extra }, "أُزيل المجلد من البحث"); }));
   };
   drawExtra();
-  const addExtra = (p) => { p = p.trim(); if (p && !extra.includes(p)) extra.push(p); $("#s-add").value = ""; drawExtra(); };
+  const addExtra = (p) => {
+    p = p.trim();
+    if (!p || extra.includes(p)) return;
+    extra.push(p); $("#s-add").value = ""; drawExtra();
+    save({ extraDirs: extra }, "أُضيف المجلد، وبدأ فحصه").catch(() => {});
+  };
+  segPick("s-theme", (t) => applyTheme(t, true));
+  segPick("s-perf", (p) => { applyPerf(p); save({ perf: p }); setTimeout(() => views.settings(v), 50); });
+  segPick("s-videos", async (m) => { await save({ videos: m }); if (m !== "off") api("/api/sync", {}).catch(() => {}); views.settings(v); });
+  $("#s-min").addEventListener("change", (e) => save({ syncMinutes: +e.target.value }));
+  $("#s-toast").addEventListener("change", (e) => save({ toasts: e.target.checked }));
+  $("#s-auto")?.addEventListener("change", (e) => save({ autostart: e.target.checked }));
+  $("#s-autoupd").addEventListener("change", (e) => save({ autoUpdate: e.target.checked }));
+  $$(".s-course").forEach((c) => c.addEventListener("change", () => save({ hidden: $$(".s-course").filter((x) => !x.checked).map((x) => +x.value) })));
+  $("#s-root").addEventListener("change", (e) => save({ rootDir: e.target.value }, "تم تغيير المجلد"));
+  $("#s-repo-save").addEventListener("click", () => save({ repo: $("#s-repo").value }));
+  $("#s-add").addEventListener("keydown", (e) => { if (e.key === "Enter") addExtra($("#s-add").value); });
+  $("#s-addbtn").addEventListener("click", () => addExtra($("#s-add").value));
+  $("#s-addpick")?.addEventListener("click", async () => { const r = await api("/api/pickfolder", {}); if (r.path) addExtra(r.path); });
+  $("#s-pick")?.addEventListener("click", async () => { const r = await api("/api/pickfolder", {}); if (r.path) { $("#s-root").value = r.path; save({ rootDir: r.path }, "تم تغيير المجلد"); } });
   $("#s-install")?.addEventListener("click", async () => {
     try { await api("/api/install", {}); toast("تم التثبيت. يُعاد تشغيل البرنامج من مكانه الجديد…", "install", 6000); waitForServer(); }
     catch (e) { toast(e.message, "alert"); }
   });
-  $$("#s-theme button").forEach((b) => b.addEventListener("click", () => { applyTheme(b.dataset.t, true); $$("#s-theme button").forEach((x) => x.classList.toggle("on", x === b)); }));
-  $("#s-addbtn").addEventListener("click", () => addExtra($("#s-add").value));
-  $("#s-addpick")?.addEventListener("click", async () => { const r = await api("/api/pickfolder", {}); if (r.path) addExtra(r.path); });
-  $("#s-pick")?.addEventListener("click", async () => { const r = await api("/api/pickfolder", {}); if (r.path) $("#s-root").value = r.path; });
   $("#relink").addEventListener("click", () => go("setup"));
   $("#logout")?.addEventListener("click", async () => {
     if (!confirm("فصل حساب المودل؟ ملفاتك المنزّلة ستبقى كما هي.")) return;
@@ -1010,20 +1212,6 @@ ${S.canInstall && !S.installed ? `
   $("#s-backup").addEventListener("click", async () => { await api("/api/backup", {}); toast("تم حفظ نسخة احتياطية من بياناتك", "archive"); });
   $("#s-rescan").addEventListener("click", async () => { await api("/api/rescan", {}); toast("بدأ فحص الملفات", "refresh"); });
   $("#s-quit").addEventListener("click", quitApp);
-  $("#s-save").addEventListener("click", async () => {
-    $("#s-err").textContent = "";
-    if ($("#s-add").value.trim()) addExtra($("#s-add").value);
-    try {
-      await api("/api/settings", {
-        rootDir: $("#s-root").value, extraDirs: extra, syncMinutes: +$("#s-min").value, toasts: $("#s-toast").checked,
-        hidden: $$(".s-course").filter((c) => !c.checked).map((c) => +c.value),
-        autostart: $("#s-auto") ? $("#s-auto").checked : undefined, autoUpdate: $("#s-autoupd").checked, repo: $("#s-repo").value,
-      });
-      toast("تم حفظ الإعدادات");
-      await refresh();
-      views.settings(v);
-    } catch (e) { $("#s-err").textContent = e.message; toast(e.message, "alert"); }
-  });
 };
 
 /* ================= import ================= */
@@ -1444,5 +1632,8 @@ window.addEventListener("popstate", () => { if (!fromHash()) go("home", {}, true
   }
   if (!S.linked && !location.hash.match(/feedback|settings|search|import|links|images/)) go("setup");
   else if (!fromHash()) go("home", {}, true);
-  setInterval(() => { if (!offline) refresh(); }, 5000);
+  setInterval(() => { if (!offline && !document.hidden) refresh(); }, 5000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !offline) refresh(); });
+  if (S.perf && S.perf !== perfPref()) applyPerf(S.perf);
+  setTimeout(measurePerf, 1200);
 })();

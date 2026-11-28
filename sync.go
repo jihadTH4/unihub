@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -78,16 +79,17 @@ type EventRec struct {
 }
 
 type State struct {
-	Files         map[string]*FileRec `json:"files"`
-	Courses       []CourseRec         `json:"courses"`
-	Assignments   []AssignRec         `json:"assignments"`
-	Notifications []NotifRec          `json:"notifications"`
-	Events        []EventRec          `json:"events"`
-	SeenNotif     map[int]bool        `json:"seenNotif"`
-	Reminded      map[int]bool        `json:"reminded"`
-	LastSync      int64               `json:"lastSync"`
-	LastError     string              `json:"lastError"`
-	FirstSyncDone bool                `json:"firstSyncDone"`
+	Files         map[string]*FileRec  `json:"files"`
+	Courses       []CourseRec          `json:"courses"`
+	Assignments   []AssignRec          `json:"assignments"`
+	Notifications []NotifRec           `json:"notifications"`
+	Events        []EventRec           `json:"events"`
+	SeenNotif     map[int]bool         `json:"seenNotif"`
+	Reminded      map[int]bool         `json:"reminded"`
+	LastSync      int64                `json:"lastSync"`
+	LastError     string               `json:"lastError"`
+	FirstSyncDone bool                 `json:"firstSyncDone"`
+	Videos        map[string]*VideoRec `json:"videos"`
 }
 
 type SyncStatus struct {
@@ -119,6 +121,9 @@ func loadState() {
 	}
 	if st.Reminded == nil {
 		st.Reminded = map[int]bool{}
+	}
+	if st.Videos == nil {
+		st.Videos = map[string]*VideoRec{}
 	}
 }
 
@@ -260,6 +265,7 @@ func runSync() error {
 	defer setStatus(func(s *SyncStatus) { s.Running = false; s.Phase = "" })
 
 	err := doSync(c)
+	afterSyncVideos(c)
 	stMu.Lock()
 	st.LastSync = time.Now().Unix()
 	if err != nil {
@@ -295,6 +301,7 @@ func doSync(c Config) error {
 	firstSync := !st.FirstSyncDone
 	stMu.RUnlock()
 
+	videosOn := videoMode(c) != "off"
 	var courseRecs []CourseRec
 	var activeIDs []int
 	for _, co := range courses {
@@ -328,15 +335,52 @@ func doSync(c Config) error {
 			errs = append(errs, cr.Name+": "+err.Error())
 			continue
 		}
+		vf := videoFinder{m: m, cr: cr}
 		for _, sec := range secs {
+			if videosOn {
+				vf.fromHTML(sec, sec.Name, sec.Summary)
+			}
 			for _, mod := range sec.Modules {
+				if videosOn {
+					vf.fromHTML(sec, mod.Name, mod.Description)
+				}
 				switch mod.ModName {
-				case "assign", "url", "label", "forum", "quiz", "page", "lti", "choice", "feedback", "attendance":
+				case "page", "url", "label":
+					// videos placed inside a page, or a link to a video file on the Moodle site
+					for _, f := range mod.Contents {
+						if !videosOn || f.FileURL == "" || !m.sameSite(f.FileURL) {
+							continue
+						}
+						name := f.FileName
+						if f.Type == "url" {
+							if pu, err := url.Parse(f.FileURL); err == nil {
+								name, _ = url.PathUnescape(path.Base(pu.Path))
+							}
+						}
+						vf.add(sec, mod.Name, name, f.FileURL, f.FileSize, f.TimeModified)
+					}
+					continue
+				case "assign", "forum", "quiz", "lti", "choice", "feedback", "attendance":
 					continue
 				}
 				for _, f := range mod.Contents {
 					if f.Type != "file" || f.FileURL == "" {
 						continue
+					}
+					if isMedia(f.FileName) {
+						stMu.RLock()
+						had := st.Files[fileKey(f.FileURL)] != nil
+						stMu.RUnlock()
+						if !had {
+							if videosOn {
+								title := ""
+								if mod.ModName != "resource" {
+									title = mod.Name
+								}
+								vf.add(sec, title, f.FileName, f.FileURL, f.FileSize, f.TimeModified)
+							}
+							continue
+						}
 					}
 					name, err := syncFile(m, cr, sec, mod, f)
 					if err != nil {

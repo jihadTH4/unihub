@@ -93,6 +93,7 @@ func newServer(port int) http.Handler {
 
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
 		c := getConfig()
+		vw, va := videoCounts() // before stMu.RLock: it takes the lock itself
 		stMu.RLock()
 		var recent []*FileRec
 		for _, f := range st.Files {
@@ -139,6 +140,10 @@ func newServer(port int) http.Handler {
 			"installed":     isInstalled(),
 			"canInstall":    canInstall(),
 			"hideInstall":   c.HideInstall,
+			"videos":        videoMode(c),
+			"videosWaiting": vw,
+			"videosActive":  va,
+			"perf":          c.Perf,
 			"theme":         c.Theme,
 			"autoUpdate":    c.AutoUpdate,
 			"repo":          currentRepo(),
@@ -210,6 +215,8 @@ func newServer(port int) http.Handler {
 			Repo        *string  `json:"repo"`
 			Links       *[]Link  `json:"links"`
 			HideInstall *bool    `json:"hideInstall"`
+			Videos      *string  `json:"videos"`
+			Perf        *string  `json:"perf"`
 		}
 		if readBody(r, &req) != nil {
 			writeErr(w, 400, "طلب غير صالح")
@@ -284,9 +291,23 @@ func newServer(port int) http.Handler {
 			if req.HideInstall != nil {
 				c.HideInstall = *req.HideInstall
 			}
+			if req.Videos != nil && (*req.Videos == "auto" || *req.Videos == "manual" || *req.Videos == "off") {
+				c.Videos = *req.Videos
+			}
+			if req.Perf != nil && (*req.Perf == "auto" || *req.Perf == "full" || *req.Perf == "lite") {
+				c.Perf = *req.Perf
+			}
 		})
 		if req.RootDir != nil || req.ExtraDirs != nil {
 			go indexer.Rescan()
+		}
+		if req.Videos != nil {
+			switch *req.Videos {
+			case "auto":
+				go queueVideos(nil, false)
+			case "off":
+				go stopVideos()
+			}
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
@@ -340,6 +361,33 @@ func newServer(port int) http.Handler {
 		writeJSON(w, indexer.FilesUnder(dir))
 	})
 
+	mux.HandleFunc("/api/videos", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"mode": videoMode(getConfig()), "items": videoList(), "progress": getVideoProgress()})
+	})
+	mux.HandleFunc("/api/videos/get", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Keys []string `json:"keys"`
+		}
+		readBody(r, &req)
+		n := queueVideos(req.Keys, true)
+		writeJSON(w, map[string]any{"queued": n})
+	})
+	mux.HandleFunc("/api/videos/stop", func(w http.ResponseWriter, r *http.Request) {
+		stopVideos()
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/api/videos/hide", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Keys []string `json:"keys"`
+			Hide bool     `json:"hide"`
+		}
+		if readBody(r, &req) != nil || len(req.Keys) == 0 {
+			writeErr(w, 400, "طلب غير صالح")
+			return
+		}
+		setVideosHidden(req.Keys, req.Hide)
+		writeJSON(w, map[string]any{"ok": true})
+	})
 	mux.HandleFunc("/api/open", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Path   string `json:"path"`

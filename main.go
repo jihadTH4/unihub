@@ -104,6 +104,7 @@ func main() {
 	go scheduler()
 	go feedbackLoop()
 	go updateLoop()
+	go videoWorker()
 	go func() {
 		// bring other copies of UniHub.exe on this computer up to this version
 		time.Sleep(20 * time.Second)

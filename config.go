@@ -28,6 +28,8 @@ type Config struct {
 	Links         []Link   `json:"links"` // the user's own university links (portal, pages, sites)
 	PinnedImages  []string `json:"pinnedImages"`
 	HideInstall   bool     `json:"hideInstall"` // the user chose «لاحقاً» on the install banner
+	Videos        string   `json:"videos"`      // lecture videos: auto | manual | off ("" = default for the device)
+	Perf          string   `json:"perf"`        // animations: auto | full | lite ("" = auto)
 }
 
 // Link is a personal shortcut shown in the sidebar and on the home page.
